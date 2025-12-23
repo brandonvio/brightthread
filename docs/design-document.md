@@ -306,17 +306,91 @@ For additional diagrams (flows and observability visuals), see the [Architecture
 
 ## 6. Key Tradeoffs
 
-### 6.1 LangGraph vs. Simple Prompt Chain
+### 6.1 Graph-Based Workflow Agent vs. Autonomous ReAct Agent
 
-**Chose: LangGraph**
+A fundamental architectural distinction exists within LLM-powered agents: **workflow agents** (explicit state machines with predetermined control flow) versus **autonomous agents** (ReAct-style agents where the LLM decides when to call which tools).
 
-| Pros | Cons |
-|:-----|:-----|
-| Explicit states = predictable, auditable | More complex than simple loop |
-| Native human-in-the-loop support | Learning curve |
-| Easier to test individual states | Framework dependency |
+**Chose: Graph-Based Workflow Agent (LangGraph StateGraph)**
 
-**Rationale:** Order changes have real consequences. Predictability over flexibility.
+The CX Order Support Agent uses LangGraph's `StateGraph` to define an explicit, deterministic workflow. The graph structure—not the LLM—determines when tools are called and in what sequence:
+
+```
+intent_classification → [route by intent] → fetch_order_details → confirm_understanding
+    → policy_evaluation → [route by decision] → execute_modification
+```
+
+Each node represents a predetermined step. The LLM provides natural language understanding and generation within each node, but the workflow itself is fixed and predictable.
+
+**Alternative: Autonomous ReAct-Style Agent**
+
+In a ReAct (Reasoning + Acting) pattern, the agent operates differently:
+1. The LLM receives a set of tools with descriptions
+2. The LLM reasons about the current situation and decides which tool to call
+3. The LLM loops (observe → think → act) until the task is complete
+
+This approach offers flexibility—the agent can adapt to novel scenarios—but sacrifices predictability.
+
+**Pattern Comparison**
+
+| Criteria | Graph-Based Workflow | Autonomous ReAct Agent |
+|:---------|:---------------------|:-----------------------|
+| **Predictability** | ✅ High—exact flow every time | ⚠️ Variable—LLM decides path |
+| **Testability** | ✅ Each node tests independently | ⚠️ Harder to unit test paths |
+| **Debuggability** | ✅ Clear state at each step | ⚠️ Must trace LLM reasoning |
+| **Token Efficiency** | ✅ Only necessary LLM calls | ⚠️ Often more calls (reasoning loops) |
+| **Error Handling** | ✅ Explicit per-node | ⚠️ LLM must handle gracefully |
+| **Flexibility** | ⚠️ New flows require graph changes | ✅ Can handle novel scenarios |
+| **Guardrails** | ✅ Mandatory steps are enforced | ⚠️ LLM might skip steps |
+| **Auditability** | ✅ Complete state transition log | ⚠️ Reasoning traces vary |
+
+**Why Graph-Based Workflow Is Correct for This Use Case**
+
+1. **Business-Critical Workflow Requirements**
+
+   Order modifications follow a strict process: understand request → confirm understanding → check policy → (conditional confirmation if needed) → execute. An autonomous agent might:
+   - Skip the confirmation step
+   - Execute before checking policy
+   - Forget to present cost/delay conditions
+
+   The graph **guarantees** policy evaluation happens before execution. There is no path through the workflow that bypasses this check.
+
+2. **Financial and Operational Consequences**
+
+   Order changes have real-world impact: inventory adjustments, production changes, shipping modifications, and potential cost implications for both BrightThread and the customer. This demands:
+   - Deterministic behavior that can be validated
+   - Clear audit trail of every decision
+   - Guaranteed policy enforcement without exception
+
+   An autonomous agent that "usually" checks policy is unacceptable when incorrect changes could cost thousands of dollars or delay critical orders.
+
+3. **Regulatory and Audit Compliance**
+
+   B2B commerce requires accountability. The graph-based approach provides:
+   - A complete, reproducible record of state transitions
+   - Proof that policy was evaluated for every modification
+   - Clear causality from customer request to executed change
+
+   This audit trail is essential for dispute resolution and compliance.
+
+4. **Tools as Mandatory Steps, Not Optional Actions**
+
+   In a true autonomous agent scenario, tools represent *options* the LLM chooses between based on the situation. In order modification, the "tools" (fetch order, evaluate policy, execute change) are *mandatory steps* in a process, not optional capabilities.
+
+   This is fundamentally a workflow, not a decision tree. The graph pattern matches this reality.
+
+5. **Token and Cost Efficiency**
+
+   ReAct agents often require multiple reasoning loops ("Let me think about what to do next...") before taking action. The workflow approach makes exactly the LLM calls needed—no speculative reasoning, no backtracking. For a B2B platform where cost efficiency matters, this is significant.
+
+6. **Testability and Reliability**
+
+   Each graph node can be unit tested in isolation with mocked inputs and expected outputs. The routing logic between nodes is deterministic and testable. This enables high test coverage and confidence in production behavior—critical for a system that modifies real orders.
+
+**Conclusion**
+
+The graph-based workflow pattern is not merely a valid choice—it is the *appropriate* choice for order modification. The use case demands predictability, mandatory policy checks, clear audit trails, and deterministic behavior. These requirements align precisely with the strengths of workflow-based agents and conflict directly with the flexibility-first design of autonomous agents.
+
+The explicit, "mechanical" nature of the graph is a feature, not a limitation. It ensures that every order modification request follows the same validated path, with guaranteed policy enforcement and complete auditability.
 
 ### 6.2 ECS Fargate vs. Lambda
 

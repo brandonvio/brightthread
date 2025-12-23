@@ -42,42 +42,90 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 ### Production Architecture
 
 ```mermaid
-flowchart TB
-    subgraph Prod["Production"]
-        UI[React Portal] --> Edge[CloudFront + WAF]
-        UI --> Cognito["Cognito (JWT)"]
-        Edge --> ALB[Application Load Balancer]
-
-        ALB --> AgentSvc["CX Order Agent (ECS Fargate)"]
-        ALB --> PlatformSvc["B2B Platform Services (ECS Fargate)"]
-
-        AgentSvc --> Bedrock[Claude via Bedrock]
-        AgentSvc --> DDB[(DynamoDB)]
-        AgentSvc --> OS[(OpenSearch Policy Vectors)]
-        AgentSvc --> PlatformSvc
-
-        PlatformSvc --> RDS[(PostgreSQL)]
-        PlatformSvc --> ERP[ERP]
-        PlatformSvc --> CRM[CRM]
-        PlatformSvc --> Shipping[Shipping]
+flowchart LR
+    subgraph Client
+        UI[React Portal]
     end
+
+    subgraph Auth
+        Cognito["Cognito (JWT)"]
+    end
+
+    subgraph Edge
+        CDN[CloudFront + WAF]
+        ALB[Load Balancer]
+    end
+
+    subgraph Services
+        AgentSvc["CX Order Agent<br/>(ECS Fargate)"]
+        PlatformSvc["B2B Platform Services<br/>(ECS Fargate)"]
+    end
+
+    subgraph AI
+        Bedrock[Claude via Bedrock]
+        OS[(OpenSearch<br/>Policy Vectors)]
+    end
+
+    subgraph Data
+        DDB[(DynamoDB)]
+        RDS[(PostgreSQL)]
+    end
+
+    subgraph External
+        ERP[ERP]
+        CRM[CRM]
+        Shipping[Shipping]
+    end
+
+    UI --> Cognito
+    UI --> CDN --> ALB
+    ALB --> AgentSvc
+    ALB --> PlatformSvc
+    AgentSvc --> Bedrock
+    AgentSvc --> OS
+    AgentSvc --> DDB
+    AgentSvc --> PlatformSvc
+    PlatformSvc --> RDS
+    PlatformSvc --> ERP
+    PlatformSvc --> CRM
+    PlatformSvc --> Shipping
 ```
 
 ### PoC Architecture
 
 ```mermaid
-flowchart TB
-    subgraph PoC["Proof of Concept"]
-        CLI[curl / Postman] --> APIGW[API Gateway]
-        APIGW --> Lambda["Lambda (FastAPI)"]
-        Lambda --> Agent["LangGraph Agent"]
-        Agent --> Bedrock[Claude via Bedrock]
-        Agent --> DDB[(DynamoDB)]
-        Lambda --> Services["Functional Services (Orders, Inventory, Policies)"]
-        Services --> DB[(PostgreSQL)]
+flowchart LR
+    subgraph Client
+        CLI[curl / Postman]
     end
 
-    style Services fill:#EBCB8B,stroke:#D08770,color:#2E3440
+    subgraph API
+        APIGW[API Gateway]
+        Lambda["Lambda (FastAPI)"]
+    end
+
+    subgraph Agent
+        LG["LangGraph Agent"]
+        Bedrock[Claude via Bedrock]
+    end
+
+    subgraph Data
+        DDB[(DynamoDB)]
+        DB[(PostgreSQL)]
+    end
+
+    subgraph Services
+        Svc["Functional Services<br/>(Orders, Inventory, Policies)"]
+    end
+
+    CLI --> APIGW --> Lambda
+    Lambda --> LG
+    LG --> Bedrock
+    LG --> DDB
+    Lambda --> Svc
+    Svc --> DB
+
+    style Svc fill:#EBCB8B,stroke:#D08770,color:#2E3440
 ```
 
 **Key Differences:**

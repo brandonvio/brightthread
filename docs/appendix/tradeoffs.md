@@ -71,23 +71,51 @@ Detailed analysis of key architectural decisions and the reasoning behind them.
 
 ---
 
-## 5. LangGraph for Agent Orchestration
+## 5. Graph-Based Workflow Agent vs. Autonomous ReAct Agent
 
-**Decision:** Use LangGraph rather than a simple tool-calling loop or another framework.
+**Decision:** Use a graph-based workflow agent (LangGraph StateGraph) rather than an autonomous ReAct-style agent where the LLM decides when to call tools.
 
 | Chose | Over |
 |:------|:-----|
-| Explicit state machine / workflow graph | Implicit loop (`while tool_calls: execute`) |
-| Built-in support for human-in-the-loop | Custom interrupt/resume logic |
-| Clear visualization of conversation flow | Ad-hoc control flow |
+| Predictable, deterministic flow every time | Flexible LLM-driven tool selection |
+| Guaranteed mandatory steps (policy check before execute) | LLM might skip steps |
+| Each node testable in isolation | Must trace LLM reasoning to debug |
+| Token-efficient (no reasoning loops) | Adaptable to novel scenarios |
+| Complete audit trail of state transitions | Variable reasoning traces |
 
-**Rationale:** The assignment requires structured flows (validate → propose → confirm → execute) and human escalation. LangGraph makes these explicit rather than buried in conditional logic.
+**Rationale:**
 
-**Risk:** Added dependency. If LangGraph's abstractions don't fit a future need, we're coupled to it. Acceptable given the fit for current requirements.
+Order modifications are a **workflow**, not an open-ended task. The "tools" (fetch order, evaluate policy, execute change) are *mandatory steps* in a process, not options the LLM chooses between. The graph guarantees:
+
+1. **Policy evaluation happens before execution** — no path bypasses this check
+2. **Customer confirmation before changes** — required for financial accountability
+3. **Deterministic behavior** — same request produces same flow, enabling validation
+4. **Clear audit trail** — essential for B2B dispute resolution and compliance
+
+An autonomous agent that "usually" checks policy is unacceptable when incorrect changes could cost thousands of dollars or delay critical orders.
+
+**Risk:** New conversation flows require graph changes rather than prompt updates. Acceptable given the safety requirements of order modification.
 
 ---
 
-## 6. ECS Fargate over Lambda
+## 6. LangGraph as Workflow Framework
+
+**Decision:** Use LangGraph rather than a custom state machine implementation.
+
+| Chose | Over |
+|:------|:-----|
+| Native checkpointing (DynamoDB) | Custom session persistence |
+| Built-in human-in-the-loop support | Custom interrupt/resume logic |
+| Graph visualization for debugging | Manual flow documentation |
+| Ecosystem compatibility (LangChain) | Framework independence |
+
+**Rationale:** LangGraph provides the workflow primitives we need (nodes, conditional edges, state persistence) with production-ready checkpointing. Building equivalent functionality would add significant development effort without clear benefit.
+
+**Risk:** Framework dependency. If LangGraph's abstractions don't fit a future need, migration would require effort. Acceptable given the current fit.
+
+---
+
+## 7. ECS Fargate over Lambda
 
 **Decision:** Deploy the API (including the agent endpoint) as a containerized service on **ECS Fargate**, rather than Lambda functions.
 
@@ -112,7 +140,7 @@ Detailed analysis of key architectural decisions and the reasoning behind them.
 
 ---
 
-## 7. RAG vs. Fine-Tuned Model for Policies
+## 8. RAG vs. Fine-Tuned Model for Policies
 
 **Decision:** Use RAG (OpenSearch vector search) rather than fine-tuning a model on policy documents.
 
@@ -129,7 +157,7 @@ Detailed analysis of key architectural decisions and the reasoning behind them.
 
 ---
 
-## 8. DynamoDB for Conversation History
+## 9. DynamoDB for Conversation History
 
 **Decision:** Store conversation history in DynamoDB rather than PostgreSQL.
 
@@ -145,7 +173,7 @@ Detailed analysis of key architectural decisions and the reasoning behind them.
 
 ---
 
-## 9. Binary Escalation vs. Approval Queue
+## 10. Binary Escalation vs. Approval Queue
 
 **Decision:** Use binary escalation (agent handles it OR escalates fully) rather than an approval queue.
 
