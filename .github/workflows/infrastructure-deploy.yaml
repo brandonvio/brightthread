@@ -1,0 +1,95 @@
+name: Deploy Infrastructure
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'infrastructure/**'
+      - '.github/workflows/infrastructure-deploy.yaml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  DEPLOY_ARTIFACTS_BUCKET: brightthread-deploy-artifacts
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Install dependencies
+        working-directory: infrastructure
+        run: uv sync
+
+      - name: Assume AWS Role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::233569452394:role/brightthread-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create S3 bucket if not exists
+        run: |
+          aws s3 ls "s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}" || \
+          aws s3 mb "s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}" --region ${{ env.AWS_REGION }}
+
+      - name: CDK Synthesize
+        working-directory: infrastructure
+        run: uv run cdk synth
+
+      - name: CDK Deploy Infrastructure Stacks
+        working-directory: infrastructure
+        run: |
+          # Deploy stacks in dependency order (excluding BackendServiceStack)
+          # 1. Foundational stacks (no dependencies)
+          # 2. Certificate stacks (cross-region, deploy separately)
+          # 3. CDN and database stacks
+          # 4. IAM stack (depends on DynamoDB exports)
+          # 5. OpenSearch stack (depends on IAM exports)
+          # 6. Route53 stack (depends on CDN)
+          uv run cdk deploy \
+            OidcStack \
+            InfrastructureStack \
+            CertificateStackPrimary \
+            CertificateStackUsEast1 \
+            CDNStack \
+            RDSStack \
+            DynamoDBStack \
+            IAMStack \
+            OpenSearchStack \
+            Route53Stack \
+            DataDashboardStack \
+            --require-approval never
+
+      - name: Output deployment info
+        run: |
+          echo "✓ Infrastructure deployment complete"
+          echo ""
+          echo "Stack Outputs:"
+          aws cloudformation describe-stacks \
+            --query 'Stacks[?StackStatus!=`DELETE_COMPLETE`].Outputs[].[OutputKey,OutputValue]' \
+            --output table \
+            --region ${{ env.AWS_REGION }} || true

@@ -1,0 +1,25 @@
+docs:
+  - title: "Overview"
+    children:
+      - title: "Home"
+        url: /
+      - title: "Design Document"
+        url: /design-document/
+      - title: "Architecture"
+        url: /architecture/
+      - title: "Proof of Concept"
+        url: /poc/
+  - title: "Appendix"
+    children:
+      - title: "Assumptions"
+        url: /appendix/assumptions/
+      - title: "Architecture Diagrams"
+        url: /appendix/architecture-diagrams/
+      - title: "Tradeoffs"
+        url: /appendix/tradeoffs/
+      - title: "Data Model"
+        url: /appendix/data-model/
+      - title: "Order Lifecycle"
+        url: /appendix/order-lifecycle/
+      - title: "API Reference"
+        url: /appendix/api/

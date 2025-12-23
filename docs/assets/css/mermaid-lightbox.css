@@ -1,0 +1,94 @@
+/* Mermaid diagram click hint */
+.mermaid {
+  transition: opacity 0.2s;
+}
+
+.mermaid:hover {
+  opacity: 0.85;
+}
+
+/* Lightbox overlay */
+.mermaid-lightbox-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0, 0, 0, 0.9);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Lightbox container */
+.mermaid-lightbox {
+  width: 95vw;
+  height: 95vh;
+  display: flex;
+  flex-direction: column;
+  background: #2E3440;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Controls bar */
+.mermaid-lightbox-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 16px;
+  background: #3B4252;
+  border-bottom: 1px solid #4C566A;
+  flex-shrink: 0;
+}
+
+.mermaid-lb-btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: 4px;
+  background: #5E81AC;
+  color: #ECEFF4;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  transition: background 0.2s;
+}
+
+.mermaid-lb-btn:hover {
+  background: #81A1C1;
+}
+
+.mermaid-lb-hint {
+  color: #8FBCBB;
+  font-size: 13px;
+  margin-left: 16px;
+}
+
+.mermaid-lb-close {
+  margin-left: auto;
+  background: #BF616A;
+}
+
+.mermaid-lb-close:hover {
+  background: #d08770;
+}
+
+/* Diagram content area - wrapper for pan/zoom */
+.mermaid-lightbox-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+}
+
+/* Inner wrapper that gets transformed */
+.mermaid-lightbox-inner {
+  transform-origin: center center;
+}
+
+.mermaid-lightbox-inner svg {
+  display: block;
+}

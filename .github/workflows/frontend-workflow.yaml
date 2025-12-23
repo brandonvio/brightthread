@@ -1,0 +1,70 @@
+name: Frontend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'frontend/**'
+      - '.github/workflows/frontend-workflow.yaml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  S3_BUCKET: brightthread-web-233569452394
+  CLOUDFRONT_DISTRIBUTION_ID: E39I7MJ3F1WNC7
+  BUILD_DIR: frontend/dist
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build frontend
+        working-directory: frontend
+        run: npm run build
+
+      - name: Assume AWS Role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::233569452394:role/brightthread-github-actions-role
+          aws-region: us-west-2
+
+      - name: Upload to S3
+        run: |
+          aws s3 sync ${{ env.BUILD_DIR }} s3://${{ env.S3_BUCKET }}/ \
+            --delete \
+            --cache-control "public, max-age=31536000" \
+            --exclude "index.html"
+
+          aws s3 cp ${{ env.BUILD_DIR }}/index.html s3://${{ env.S3_BUCKET }}/index.html \
+            --cache-control "public, max-age=3600" \
+            --content-type "text/html"
+
+      - name: Invalidate CloudFront cache
+        run: |
+          aws cloudfront create-invalidation \
+            --distribution-id ${{ env.CLOUDFRONT_DISTRIBUTION_ID }} \
+            --paths "/*"
+
+      - name: Deployment summary
+        run: |
+          echo "✅ Frontend deployment complete!"
+          echo "📍 S3 Bucket: ${{ env.S3_BUCKET }}"
+          echo "🌐 CloudFront URL: https://${{ env.CLOUDFRONT_DISTRIBUTION_ID }}.cloudfront.net"
+          echo "🔄 Cache invalidation triggered for all paths"

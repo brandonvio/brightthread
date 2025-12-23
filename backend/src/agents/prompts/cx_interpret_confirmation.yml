@@ -1,0 +1,44 @@
+name: cx-interpret-confirmation
+description: Interpret user response to a confirmation question
+output_type: json
+instructions:
+  - "You are interpreting the user's response to a yes/no confirmation question."
+  - "The user was asked to confirm a proposed order modification."
+  - "Analyze their response and determine their intent."
+  - ""
+  - "Response types:"
+  - "  CONFIRMED - User agrees with the proposed change"
+  - "    Examples: 'yes', 'correct', 'that's right', 'go ahead', 'please proceed', 'sounds good', 'perfect', 'do it'"
+  - "  REJECTED - User disagrees or wants to cancel"
+  - "    Examples: 'no', 'wrong', 'cancel', 'never mind', 'stop', 'don't do that'"
+  - "  CORRECTION - User provides an alternative value (different quantity, size, or color)"
+  - "    Examples: 'actually make it 50', 'no, white not blue', 'change it to large instead'"
+  - "  UNCLEAR - Cannot determine user's intent"
+  - "    Examples: 'maybe', 'I'm not sure', 'what do you think?'"
+  - ""
+  - "For CORRECTION responses, extract the corrected value(s) if possible."
+  - "ONLY output valid JSON, nothing else. No explanation, no markdown, just the JSON object."
+  - "IMPORTANT: Use the exact key name 'interpretation' (not 'type' or other variants)."
+output_format: |
+  {
+    "interpretation": "CONFIRMED" | "REJECTED" | "CORRECTION" | "UNCLEAR",
+    "corrected_quantity": integer or null,
+    "corrected_size": string or null,
+    "corrected_color": string or null,
+    "reasoning": string
+  }
+examples:
+  - input: "yes"
+    output: '{"interpretation": "CONFIRMED", "corrected_quantity": null, "corrected_size": null, "corrected_color": null, "reasoning": "Simple affirmative"}'
+  - input: "That sounds right, go ahead"
+    output: '{"interpretation": "CONFIRMED", "corrected_quantity": null, "corrected_size": null, "corrected_color": null, "reasoning": "User agrees and wants to proceed"}'
+  - input: "no, I actually want white not blue"
+    output: '{"interpretation": "CORRECTION", "corrected_quantity": null, "corrected_size": null, "corrected_color": "White", "reasoning": "User is correcting the color choice"}'
+  - input: "Make it 100 instead"
+    output: '{"interpretation": "CORRECTION", "corrected_quantity": 100, "corrected_size": null, "corrected_color": null, "reasoning": "User wants a different quantity"}'
+  - input: "Actually Large would be better"
+    output: '{"interpretation": "CORRECTION", "corrected_quantity": null, "corrected_size": "Large", "corrected_color": null, "reasoning": "User is correcting the size"}'
+  - input: "No, cancel that"
+    output: '{"interpretation": "REJECTED", "corrected_quantity": null, "corrected_size": null, "corrected_color": null, "reasoning": "User wants to cancel the change"}'
+  - input: "I'm not sure, let me think about it"
+    output: '{"interpretation": "UNCLEAR", "corrected_quantity": null, "corrected_size": null, "corrected_color": null, "reasoning": "User is uncertain"}'

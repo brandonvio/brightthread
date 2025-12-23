@@ -1,0 +1,122 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-workflow.yaml'
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  AWS_REGION: us-west-2
+  DEPLOY_ARTIFACTS_BUCKET: brightthread-deploy-artifacts
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    name: Test and Lint
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install dependencies
+        working-directory: backend
+        run: uv sync
+
+      - name: Run tests
+        working-directory: backend
+        run: uv run pytest tests/ -v --tb=short
+
+      - name: Run linting
+        working-directory: backend
+        run: uv run ruff check src/ tests/
+
+  build-and-deploy:
+    needs: test
+    runs-on: ubuntu-latest
+    name: Build and Deploy Lambda
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.13'
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v2
+
+      - name: Install AWS CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: Assume AWS Role via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::233569452394:role/brightthread-github-actions-role
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Create S3 bucket if not exists
+        run: |
+          aws s3 ls "s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}" || \
+          aws s3 mb "s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}" --region ${{ env.AWS_REGION }}
+
+      - name: Build Lambda package
+        working-directory: backend
+        run: |
+          chmod +x scripts/build-lambda.sh
+          ./scripts/build-lambda.sh
+
+      - name: Upload to S3
+        run: |
+          ARTIFACT_KEY="backend/lambda-code-${{ github.sha }}.zip"
+          aws s3 cp backend/.lambda-build/lambda-code.zip "s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}/$ARTIFACT_KEY"
+          echo "Uploaded artifact: s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}/$ARTIFACT_KEY"
+
+      - name: Install infrastructure dependencies
+        working-directory: infrastructure
+        run: uv sync
+
+      - name: Deploy BackendServiceStack
+        working-directory: infrastructure
+        env:
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+        run: |
+          uv run cdk deploy BackendServiceStack \
+            --require-approval never \
+            --region ${{ env.AWS_REGION }}
+
+      - name: Output deployment info
+        run: |
+          echo "✓ Backend deployment complete"
+          echo ""
+          echo "Artifact: s3://${{ env.DEPLOY_ARTIFACTS_BUCKET }}/backend/lambda-code-${{ github.sha }}.zip"
+          echo "Version: ${{ github.sha }}"
+          echo ""
+          echo "Stack Outputs:"
+          aws cloudformation describe-stacks \
+            --stack-name BackendServiceStack \
+            --query 'Stacks[0].Outputs[].[OutputKey,OutputValue]' \
+            --output table \
+            --region ${{ env.AWS_REGION }} || true

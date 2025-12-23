@@ -1,0 +1,30 @@
+title: BrightThread
+description: BrightThread is a mock B2B apparel commerce platform with an agentic conversational order support assistant.
+remote_theme: mmistakes/minimal-mistakes
+
+baseurl: "/brightthread"
+url: "https://brandonvio.github.io"
+
+minimal_mistakes_skin: dark
+
+# Mermaid diagrams
+head_scripts:
+  - https://cdn.jsdelivr.net/npm/mermaid@10.6.0/dist/mermaid.min.js
+  - /assets/js/mermaid-init.js
+
+plugins:
+  - jekyll-remote-theme
+  - jekyll-include-cache
+
+# Default layout settings
+defaults:
+  - scope:
+      path: ""
+      type: pages
+    values:
+      layout: single
+      classes: wide
+      sidebar:
+        nav: "docs"
+      toc: true
+      toc_sticky: true
