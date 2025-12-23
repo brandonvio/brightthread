@@ -80,10 +80,10 @@ flowchart LR
         Agent[LangGraph Agent]
 
         Bedrock[Claude via Bedrock]
-        Policy[[Policy Markdown\n(full doc in context)]]
-        MockSvc[Emulated Platform Services\n(mock order + policy enforcement)]
+        Policy[[Policy Markdown (full doc in context)]]
+        MockSvc[Emulated Platform Services (mock order + policy enforcement)]
 
-        DDB[(DynamoDB\nConversation State)]
+        DDB[(DynamoDB: Conversation State)]
         CW[CloudWatch]
         LS[LangSmith]
     end
