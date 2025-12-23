@@ -41,7 +41,6 @@ BrightThread's customers frequently need to modify orders after placement—adju
 | [Tradeoffs](appendix/tradeoffs/) | Detailed analysis of architectural decisions |
 | [Data Model](appendix/data-model/) | Entity relationships and schema |
 | [Order Lifecycle](appendix/order-lifecycle/) | Order states and change policies |
-| [API Reference](appendix/api/) | Endpoint documentation |
 | [Interactive API Docs](https://brandonvio.github.io/brightthread/api/) | Swagger UI for API exploration |
 
 ---

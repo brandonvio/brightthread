@@ -20,4 +20,4 @@ docs:
       - title: "Order Lifecycle"
         url: /appendix/order-lifecycle/
       - title: "API Reference"
-        url: /appendix/api/
+        url: https://brandonvio.github.io/brightthread/api/
