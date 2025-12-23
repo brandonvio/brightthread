@@ -58,7 +58,6 @@ BrightThread is a B2B apparel commerce platform with an AI-powered CX agent that
 </td>
 <td align="center">
 <img src="https://img.shields.io/badge/PostgreSQL-4169E1?style=flat-square&logo=postgresql&logoColor=white" alt="PostgreSQL"><br>
-<img src="https://img.shields.io/badge/OpenSearch-005EB8?style=flat-square&logo=opensearch&logoColor=white" alt="OpenSearch"><br>
 <img src="https://img.shields.io/badge/DynamoDB-4053D6?style=flat-square&logo=amazondynamodb&logoColor=white" alt="DynamoDB">
 </td>
 </tr>
@@ -74,34 +73,24 @@ flowchart TB
         UI[Chat Widget]
     end
 
-    subgraph AWS["AWS Infrastructure"]
-        APIGW[API Gateway]
-        Lambda[Lambda]
+    subgraph PoC["PoC Runtime (Local / Dev)"]
+        API[FastAPI Agent API]
         Agent[LangGraph Agent]
         Bedrock[Claude via Bedrock]
-        DDB[(DynamoDB)]
-        OS[(OpenSearch)]
+        DDB[(DynamoDB<br/>Conversation State)]
+        Policy[Policy Markdown<br/>(full doc in context)]
+        MockSvc[Emulated Platform Services<br/>(mock order + policy enforcement)]
+        CW[CloudWatch Logs/Metrics]
+        LS[LangSmith Traces<br/>(agent observability)]
     end
 
-    subgraph Existing["BrightThread Systems"]
-        Services[Python Services]
-        DB[(PostgreSQL)]
-    end
-
-    subgraph External["External Systems"]
-        ERP[Odoo ERP]
-        CRM[Pipedrive CRM]
-        Ship[Shippo]
-    end
-
-    UI --> APIGW --> Lambda --> Agent
+    UI --> API --> Agent
     Agent <--> Bedrock
     Agent <--> DDB
-    Agent <--> OS
-    Agent --> Services --> DB
-    Services --> ERP
-    Services --> CRM
-    Services --> Ship
+    Agent --> Policy
+    Agent --> MockSvc
+    API --> CW
+    Agent -. traces .-> LS
 ```
 
 ---
@@ -113,9 +102,10 @@ flowchart TB
 | 🗣️ **Natural Language Orders** | Customers describe changes in plain English |
 | ✅ **Policy Validation** | Agent checks what's allowed based on order state |
 | 📦 **Inventory Awareness** | Real-time availability checks before proposing changes |
-| 🔍 **Semantic Search** | OpenSearch retrieves relevant policies for explanations |
+| 📄 **Policy Context (PoC)** | PoC loads the full policy markdown document into agent context (no vector search) |
 | 👤 **Human-in-the-Loop** | Escalation path for complex requests |
 | 🔗 **Unified Service Layer** | Agent uses same services as web portal |
+| 📈 **Observability** | CloudWatch metrics/logs + optional LangSmith tracing for step-by-step agent debugging |
 
 ---
 
@@ -124,7 +114,7 @@ flowchart TB
 | Section | Description |
 |:--------|:------------|
 | [📖 Design Document](https://brandonvio.github.io/brightthread/design-document/) | Architecture overview, key decisions, assumptions |
-| [🏗️ Architecture](https://brandonvio.github.io/brightthread/architecture/) | System diagrams, agent state machine, data flows |
+| [🏗️ Architecture Diagrams](https://brandonvio.github.io/brightthread/appendix/architecture-diagrams/) | System diagrams, agent state machine, data flows |
 | [🧪 Proof of Concept](https://brandonvio.github.io/brightthread/poc/) | What was built and how to run it |
 | [⚖️ Tradeoffs](https://brandonvio.github.io/brightthread/appendix/tradeoffs/) | Architectural decisions and reasoning |
 | [🔄 Order Lifecycle](https://brandonvio.github.io/brightthread/appendix/order-lifecycle/) | Order states and change policies |
@@ -220,7 +210,6 @@ cdk deploy --all
 | `AWS_REGION` | AWS region (e.g., `us-west-2`) | Yes |
 | `DATABASE_URL` | PostgreSQL connection string | Yes |
 | `DYNAMODB_TABLE_NAME` | DynamoDB table for conversations | Yes |
-| `OPENSEARCH_ENDPOINT` | OpenSearch domain endpoint | Yes |
 | `BEDROCK_MODEL_ID` | Claude model ID | Yes |
 
 ### Database Migrations
