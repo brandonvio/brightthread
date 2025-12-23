@@ -217,44 +217,20 @@ flowchart LR
     JOB --> OS[OpenSearch<br/>policy vector index]
 ```
 
-### 3.3 Policy Enforcement vs. Policy Explanation
+### 3.3 Policy Enforcement: Defense in Depth
 
-The design separates **enforcement** (deterministic, service-owned) from **explanation** (LLM/RAG-owned), which improves correctness and auditability.
+The system uses two layers of policy enforcement:
 
-```mermaid
-flowchart TB
-    subgraph Request["Customer Request"]
-        REQ[Change Request]
-    end
+| Layer | Owner | Role | Example |
+|:------|:------|:-----|:--------|
+| **Agent** | LLM + policy docs | First line—guides customers, rejects obviously invalid requests | "Size changes aren't allowed after production starts" |
+| **Services** | Python code | Ultimate authority—enforces hard business rules | Can't sell inventory that doesn't exist |
 
-    subgraph Enforcement["Policy Enforcement (Services)"]
-        SVC[Python Services]
-        RULES[("Business Rules<br/>Hard Logic")]
-    end
+**Why two layers?**
 
-    subgraph Explanation["Policy Explanation (RAG)"]
-        OS3[("OpenSearch<br/>Vector Search")]
-        DOCS[("Policy chunks + embeddings<br/>(sourced from Confluence)")]
-    end
+The agent interprets policy documents to provide a good customer experience—explaining what's possible and why. But if the agent misinterprets a policy and attempts an invalid action, the services **will reject it**. Services enforce invariants that must always hold: inventory exists, order is in a valid state, customer has permission.
 
-    subgraph Response["Agent Response"]
-        ALLOWED[Present Options]
-        DENIED[Explain Why Not]
-        ESCALATE[Escalate to Human]
-    end
-
-    REQ --> SVC
-    SVC --> RULES
-    RULES --> SVC
-
-    SVC -->|allowed: true| ALLOWED
-    SVC -->|allowed: false| OS3
-    SVC -->|requires_human: true| ESCALATE
-
-    OS3 --> DOCS
-    DOCS --> OS3
-    OS3 --> DENIED
-```
+This defense-in-depth approach means the agent can be helpful without being dangerous.
 
 ### 3.4 Agent Design: Graph-Based Workflow
 
