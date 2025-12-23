@@ -81,7 +81,7 @@ flowchart LR
 
         Bedrock[Claude via Bedrock]
         Policy[["Policy Markdown (full doc in context)"]]
-        MockSvc[Emulated Platform Services (mock order + policy enforcement)]
+        MockSvc["Emulated Platform Services (mock order + policy enforcement)"]
 
         DDB[(DynamoDB: Conversation State)]
         CW[CloudWatch]
