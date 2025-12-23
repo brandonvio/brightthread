@@ -67,12 +67,11 @@ flowchart TB
 flowchart TB
     UI[React Portal] --> APIGW[API Gateway]
     APIGW --> Lambda[Lambda + FastAPI]
-
     Lambda --> Agent[LangGraph Agent]
-    Lambda --> Svc[Services Layer]
 
     Agent --> Bedrock[Claude via Bedrock]
     Agent --> DDB[(DynamoDB)]
+    Agent --> Svc[Services Layer]
 
     Svc --> RDS[(PostgreSQL)]
 

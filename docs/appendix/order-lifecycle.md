@@ -12,21 +12,35 @@ Orders progress through a series of states from creation to delivery. The polici
 ## State Diagram
 
 ```mermaid
-stateDiagram-v2
-    direction LR
-    [*] --> CREATED: Order placed
-    CREATED --> APPROVED: Customer confirms
-    CREATED --> CANCELLED: Customer cancels
-    APPROVED --> IN_PRODUCTION: Production starts
-    APPROVED --> CANCELLED: Customer cancels
-    IN_PRODUCTION --> READY_TO_SHIP: Production complete
-    IN_PRODUCTION --> CANCELLED: Partial refund
-    READY_TO_SHIP --> SHIPPED: Carrier pickup
-    SHIPPED --> DELIVERED: Delivery confirmed
-    DELIVERED --> [*]
-    DELIVERED --> RETURNED: Return processed
-    RETURNED --> [*]
-    CANCELLED --> [*]
+flowchart TD
+    subgraph happy["Happy Path"]
+        direction TB
+        START(( )) --> CREATED
+        CREATED -->|confirms| APPROVED
+        APPROVED -->|production starts| IN_PRODUCTION
+        IN_PRODUCTION -->|complete| READY_TO_SHIP
+        READY_TO_SHIP -->|pickup| SHIPPED
+        SHIPPED -->|delivered| DELIVERED
+        DELIVERED --> END1(( ))
+    end
+
+    subgraph terminal["Terminal States"]
+        direction TB
+        CANCELLED
+        RETURNED
+    end
+
+    CREATED -.->|cancel| CANCELLED
+    APPROVED -.->|cancel| CANCELLED
+    IN_PRODUCTION -.->|"cancel (50% refund)"| CANCELLED
+    DELIVERED -.->|return| RETURNED
+    CANCELLED --> END2(( ))
+    RETURNED --> END3(( ))
+
+    style happy fill:#2E3440,stroke:#A3BE8C
+    style terminal fill:#2E3440,stroke:#BF616A
+    style CANCELLED fill:#BF616A,color:#ECEFF4
+    style RETURNED fill:#EBCB8B,color:#2E3440
 ```
 
 ---
