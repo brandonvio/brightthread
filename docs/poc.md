@@ -45,11 +45,11 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 flowchart TB
     subgraph Prod["Production"]
         UI[React Portal] --> Edge[CloudFront + WAF]
-        UI --> Cognito[Cognito (JWT)]
+        UI --> Cognito["Cognito (JWT)"]
         Edge --> ALB[Application Load Balancer]
 
-        ALB --> AgentSvc[CX Order Agent (ECS Fargate)]
-        ALB --> PlatformSvc[B2B Platform Services (ECS Fargate)]
+        ALB --> AgentSvc["CX Order Agent (ECS Fargate)"]
+        ALB --> PlatformSvc["B2B Platform Services (ECS Fargate)"]
 
         AgentSvc --> Bedrock[Claude via Bedrock]
         AgentSvc --> DDB[(DynamoDB)]
@@ -69,11 +69,11 @@ flowchart TB
 flowchart TB
     subgraph PoC["Proof of Concept"]
         CLI[curl / Postman] --> APIGW[API Gateway]
-        APIGW --> Lambda[Lambda (FastAPI)]
-        Lambda --> Agent[LangGraph Agent]
+        APIGW --> Lambda["Lambda (FastAPI)"]
+        Lambda --> Agent["LangGraph Agent"]
         Agent --> Bedrock[Claude via Bedrock]
         Agent --> DDB[(DynamoDB)]
-        Lambda --> Services[Functional Services (Orders, Inventory, Policies)]
+        Lambda --> Services["Functional Services (Orders, Inventory, Policies)"]
         Services --> DB[(PostgreSQL)]
     end
 
