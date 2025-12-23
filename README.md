@@ -68,7 +68,9 @@ BrightThread is a B2B apparel commerce platform with an AI-powered CX agent that
 ## Architecture
 
 ```mermaid
-flowchart TB
+flowchart LR
+    %% PoC architecture: no OpenSearch, no external systems.
+
     subgraph Portal["Customer Portal"]
         UI[Chat Widget]
     end
@@ -76,19 +78,23 @@ flowchart TB
     subgraph PoC["PoC Runtime (Local / Dev)"]
         API[FastAPI Agent API]
         Agent[LangGraph Agent]
+
         Bedrock[Claude via Bedrock]
-        DDB["(DynamoDB)\nConversation State"]
-        Policy["Policy Markdown\n(full doc in context)"]
-        MockSvc["Emulated Platform Services\n(mock order + policy enforcement)"]
-        CW[CloudWatch Logs/Metrics]
-        LS["LangSmith Traces\n(agent observability)"]
+        Policy[[Policy Markdown\n(full doc in context)]]
+        MockSvc[Emulated Platform Services\n(mock order + policy enforcement)]
+
+        DDB[(DynamoDB\nConversation State)]
+        CW[CloudWatch]
+        LS[LangSmith]
     end
 
     UI --> API --> Agent
+
     Agent <--> Bedrock
-    Agent <--> DDB
     Agent --> Policy
     Agent --> MockSvc
+    Agent <--> DDB
+
     API --> CW
     Agent -. traces .-> LS
 ```
