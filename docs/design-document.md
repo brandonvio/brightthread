@@ -15,6 +15,33 @@ This document describes the architecture for an AI-powered Order Support Agent t
 
 Customers frequently need to modify orders after placement—adjusting quantities, changing sizes, updating addresses, or swapping artwork. Today, these requests require manual handling by CX agents who must interpret requests, check policies, coordinate with operations, and update multiple systems. This creates delays (hours to days) and inconsistent customer experiences.
 
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant Z as Zendesk
+    participant CX as CX Agent
+    participant P as Portal
+    participant S as Services
+    participant E as ERP
+
+    C->>Z: Email: "Change 20 mediums to large"
+    Z->>CX: Ticket assigned
+    CX->>CX: Read policy docs
+    CX->>P: Log in, find order
+    P->>S: Get order details
+    S->>E: Check inventory
+    E-->>S: Available
+    S-->>P: Order + inventory
+    CX->>CX: Determine if allowed
+    CX->>P: Apply change manually
+    P->>S: Update order
+    S->>E: Adjust inventory
+    CX->>Z: Reply to customer
+    Z->>C: Confirmation email
+
+    Note over C,E: Time: 4+ hours typical
+```
+
 ### Solution
 
 An agentic conversational assistant embedded in the customer portal that:
@@ -23,6 +50,37 @@ An agentic conversational assistant embedded in the customer portal that:
 - Presents options with clear tradeoffs (cost, delay)
 - Executes confirmed changes via backend services
 - Escalates to human CX agents when appropriate
+
+```mermaid
+sequenceDiagram
+    participant C as Customer
+    participant A as Agent
+    participant S as Services
+    participant E as ERP
+    participant Z as Zendesk
+
+    C->>A: "Change 20 mediums to large in order #1234"
+    A->>S: Get order #1234
+    S-->>A: Order details (status: APPROVED)
+    A->>S: Check change feasibility
+    S->>E: Check inventory
+    E-->>S: Available
+    S-->>A: Allowed, no delay
+    A->>C: "I can change 20 mediums to large. No extra cost. Confirm?"
+    C->>A: "Yes"
+    A->>S: Apply change
+    S->>E: Update inventory
+    S-->>A: Success
+    A->>C: "Done. Confirmation email sent."
+
+    Note over C,E: Time: < 3 minutes
+
+    rect rgb(100, 80, 80)
+    Note over A,Z: If complex/denied:
+    A-->>Z: Create escalation ticket
+    Z-->>C: "Support team will contact you"
+    end
+```
 
 ---
 
@@ -198,7 +256,23 @@ flowchart TB
     OS3 --> DENIED
 ```
 
-### 3.4 Agent State Machine
+### 3.4 Agent Design: Graph-Based Workflow
+
+The agent uses **LangGraph's StateGraph** to implement a deterministic workflow rather than an autonomous ReAct-style agent. This is a deliberate architectural choice driven by the requirements of order modification:
+
+**Why a Graph-Based Workflow?**
+
+1. **Mandatory Steps**: Order changes require a strict sequence—identify order → check policy → confirm with customer → execute. The graph **guarantees** this sequence; no path bypasses policy evaluation.
+
+2. **Auditability**: B2B commerce requires accountability. Every state transition is logged, providing a complete audit trail from request to execution.
+
+3. **Predictability**: The same request produces the same flow every time. This is essential when incorrect changes could cost thousands of dollars.
+
+4. **Testability**: Each node can be unit tested in isolation with mocked inputs and expected outputs.
+
+The LLM provides natural language understanding and generation within each node, but the workflow structure is fixed and predictable.
+
+### 3.5 Agent State Machine
 
 The agent operates as a state machine with defined transitions, providing predictability, testability, and auditability:
 
@@ -235,20 +309,20 @@ stateDiagram-v2
     COMPLETE --> [*]
 ```
 
-### 3.5 Reliability & Failure Handling (Implementation Notes)
+### 3.6 Reliability & Failure Handling (Implementation Notes)
 
 - **Timeouts and bounded work**: all service calls and LLM calls are time-boxed; failures degrade to clarification or escalation.
 - **Idempotency**: change-application endpoints should support idempotency keys to prevent duplicate mutations on retries.
 - **Safe retries**: retry reads and checks; avoid retrying side effects without idempotency.
 - **Partial failures**: if applying a change touches multiple systems, prefer service-level transactions or compensating actions; if uncertain, escalate.
 
-### 3.6 Observability (Implementation Notes)
+### 3.7 Observability (Implementation Notes)
 
 - **Structured logs**: include `conversation_id`, `order_id`, `state`, and `tool_name` for every transition/tool call.
 - **Tracing**: propagate correlation IDs across CloudFront/ALB → agent ECS service → platform services to support end-to-end debugging.
 - **Metrics**: publish latency (p50/p95), containment, escalation, tool error rates, and “human-review required” counts.
 
-#### 3.6.1 CloudWatch Dashboard + Alarms
+#### 3.7.1 CloudWatch Dashboard + Alarms
 
 - **Dashboards**: create a CloudWatch dashboard for “Agent Health” with (at minimum):
   - Request volume and errors by endpoint/state
@@ -260,7 +334,7 @@ stateDiagram-v2
 - **Alarms**: alert on error budget burn (5xx), elevated p95 latency, sustained timeouts, and spikes in escalation due to dependency failures.
 - **Log Insights**: ensure logs are queryable by `conversation_id`, `order_id`, and correlation ID to reconstruct incidents quickly.
 
-#### 3.6.2 LangSmith Agent Tracing
+#### 3.7.2 LangSmith Agent Tracing
 
 Use LangSmith to capture agent traces for debugging and evaluation:
 
@@ -270,30 +344,11 @@ Use LangSmith to capture agent traces for debugging and evaluation:
 
 For additional diagrams (flows and observability visuals), see the [Architecture Diagrams Appendix](/appendix/architecture-diagrams/).
 
----
-
-## 4. Key Assumptions
-
-### 4.1 Existing Systems
-
-| System | Vendor | Implication |
-|:-------|:-------|:------------|
-| E-commerce Platform | BrightThread (custom-built) | We integrate via existing Python service APIs |
-| ERP / Inventory | NetSuite | Source of truth for stock levels; inventory + production via API |
-| CRM / Support | Zendesk | Escalation workflow lives here; where CX logs interactions |
-| Payments | Stripe | Handles charges and refunds for order modifications |
-
-### 4.2 Operational Context
-
-| Assumption | Value | Rationale |
-|:-----------|:------|:----------|
-| Traffic volume | ~100-500 conversations/day | B2B bulk orders, not high-frequency retail |
-| Peak concurrency | ~20 simultaneous | Business hours clustering |
-| Change request complexity | 70% routine, 30% complex | Based on typical CX distribution |
+For assumptions about BrightThread's existing technology landscape, see the [Assumptions Appendix](/appendix/assumptions/).
 
 ---
 
-## 5. Non-Functional Requirements
+## 4. Non-Functional Requirements
 
 | Requirement | Target | Notes |
 |:------------|:-------|:------|
@@ -302,136 +357,11 @@ For additional diagrams (flows and observability visuals), see the [Architecture
 | **Containment rate** | 70% | Target for agent-resolved vs. escalated |
 | **Error rate** | < 1% | Changes applied incorrectly |
 
----
-
-## 6. Key Tradeoffs
-
-### 6.1 Graph-Based Workflow Agent vs. Autonomous ReAct Agent
-
-A fundamental architectural distinction exists within LLM-powered agents: **workflow agents** (explicit state machines with predetermined control flow) versus **autonomous agents** (ReAct-style agents where the LLM decides when to call which tools).
-
-**Chose: Graph-Based Workflow Agent (LangGraph StateGraph)**
-
-The CX Order Support Agent uses LangGraph's `StateGraph` to define an explicit, deterministic workflow. The graph structure—not the LLM—determines when tools are called and in what sequence:
-
-```
-intent_classification → [route by intent] → fetch_order_details → confirm_understanding
-    → policy_evaluation → [route by decision] → execute_modification
-```
-
-Each node represents a predetermined step. The LLM provides natural language understanding and generation within each node, but the workflow itself is fixed and predictable.
-
-**Alternative: Autonomous ReAct-Style Agent**
-
-In a ReAct (Reasoning + Acting) pattern, the agent operates differently:
-1. The LLM receives a set of tools with descriptions
-2. The LLM reasons about the current situation and decides which tool to call
-3. The LLM loops (observe → think → act) until the task is complete
-
-This approach offers flexibility—the agent can adapt to novel scenarios—but sacrifices predictability.
-
-**Pattern Comparison**
-
-| Criteria | Graph-Based Workflow | Autonomous ReAct Agent |
-|:---------|:---------------------|:-----------------------|
-| **Predictability** | ✅ High—exact flow every time | ⚠️ Variable—LLM decides path |
-| **Testability** | ✅ Each node tests independently | ⚠️ Harder to unit test paths |
-| **Debuggability** | ✅ Clear state at each step | ⚠️ Must trace LLM reasoning |
-| **Token Efficiency** | ✅ Only necessary LLM calls | ⚠️ Often more calls (reasoning loops) |
-| **Error Handling** | ✅ Explicit per-node | ⚠️ LLM must handle gracefully |
-| **Flexibility** | ⚠️ New flows require graph changes | ✅ Can handle novel scenarios |
-| **Guardrails** | ✅ Mandatory steps are enforced | ⚠️ LLM might skip steps |
-| **Auditability** | ✅ Complete state transition log | ⚠️ Reasoning traces vary |
-
-**Why Graph-Based Workflow Is Correct for This Use Case**
-
-1. **Business-Critical Workflow Requirements**
-
-   Order modifications follow a strict process: understand request → confirm understanding → check policy → (conditional confirmation if needed) → execute. An autonomous agent might:
-   - Skip the confirmation step
-   - Execute before checking policy
-   - Forget to present cost/delay conditions
-
-   The graph **guarantees** policy evaluation happens before execution. There is no path through the workflow that bypasses this check.
-
-2. **Financial and Operational Consequences**
-
-   Order changes have real-world impact: inventory adjustments, production changes, shipping modifications, and potential cost implications for both BrightThread and the customer. This demands:
-   - Deterministic behavior that can be validated
-   - Clear audit trail of every decision
-   - Guaranteed policy enforcement without exception
-
-   An autonomous agent that "usually" checks policy is unacceptable when incorrect changes could cost thousands of dollars or delay critical orders.
-
-3. **Regulatory and Audit Compliance**
-
-   B2B commerce requires accountability. The graph-based approach provides:
-   - A complete, reproducible record of state transitions
-   - Proof that policy was evaluated for every modification
-   - Clear causality from customer request to executed change
-
-   This audit trail is essential for dispute resolution and compliance.
-
-4. **Tools as Mandatory Steps, Not Optional Actions**
-
-   In a true autonomous agent scenario, tools represent *options* the LLM chooses between based on the situation. In order modification, the "tools" (fetch order, evaluate policy, execute change) are *mandatory steps* in a process, not optional capabilities.
-
-   This is fundamentally a workflow, not a decision tree. The graph pattern matches this reality.
-
-5. **Token and Cost Efficiency**
-
-   ReAct agents often require multiple reasoning loops ("Let me think about what to do next...") before taking action. The workflow approach makes exactly the LLM calls needed—no speculative reasoning, no backtracking. For a B2B platform where cost efficiency matters, this is significant.
-
-6. **Testability and Reliability**
-
-   Each graph node can be unit tested in isolation with mocked inputs and expected outputs. The routing logic between nodes is deterministic and testable. This enables high test coverage and confidence in production behavior—critical for a system that modifies real orders.
-
-**Conclusion**
-
-The graph-based workflow pattern is not merely a valid choice—it is the *appropriate* choice for order modification. The use case demands predictability, mandatory policy checks, clear audit trails, and deterministic behavior. These requirements align precisely with the strengths of workflow-based agents and conflict directly with the flexibility-first design of autonomous agents.
-
-The explicit, "mechanical" nature of the graph is a feature, not a limitation. It ensures that every order modification request follows the same validated path, with guaranteed policy enforcement and complete auditability.
-
-### 6.2 ECS Fargate vs. Lambda
-
-**Chose: ECS Fargate**
-
-| Pros | Cons |
-|:-----|:-----|
-| Matches BrightThread’s existing production compute model | Higher baseline cost vs. pure pay-per-invoke |
-| Long-running service model (streaming, websockets, larger workloads) | More operational surface area than Lambda |
-| Consistent networking/security posture with existing services | Requires container build + deployment pipeline |
-
-**Rationale:** BrightThread already runs its e-commerce backend on ECS Fargate. Running the agent on the same compute model simplifies operations, networking to existing services, and standardizes observability/security practices across the stack.
-
-### 6.3 RAG vs. Fine-Tuned Model for Policies
-
-**Chose: RAG (OpenSearch vector search)**
-
-| Pros | Cons |
-|:-----|:-----|
-| Policies update immediately | Retrieval latency |
-| No training pipeline | Can miss relevant context |
-| Source attribution | Requires embedding management |
-| Full control over indexing | Self-managed infrastructure |
-
-**Rationale:** Policies change. RAG allows updates without retraining.
-
-### 6.4 Business Logic Location
-
-**Chose: Services, not Agent**
-
-| Pros | Cons |
-|:-----|:-----|
-| Single source of truth | More upfront service design |
-| Consistent across all clients | Agent can't optimize shortcuts |
-| Testable without LLM | |
-
-**Rationale:** Web portal, CS tools, and agent should enforce identical rules.
+For detailed analysis of key architectural decisions, see the [Tradeoffs Appendix](/appendix/tradeoffs/).
 
 ---
 
-## 7. Escalation Design
+## 5. Escalation Design
 
 The agent escalates to human CX agents when:
 
@@ -450,7 +380,7 @@ The agent escalates to human CX agents when:
 
 ---
 
-## 8. Security & Compliance
+## 6. Security & Compliance
 
 | Concern | Approach |
 |:--------|:---------|
@@ -463,7 +393,7 @@ The agent escalates to human CX agents when:
 
 ---
 
-## 9. Success Metrics
+## 7. Success Metrics
 
 | Metric | Target | Purpose |
 |:-------|:-------|:--------|
@@ -475,7 +405,7 @@ The agent escalates to human CX agents when:
 
 ---
 
-## 10. Proof of Concept
+## 8. Proof of Concept
 
 A working PoC demonstrates the core agent pattern with a live customer portal:
 

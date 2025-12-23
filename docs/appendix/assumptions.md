@@ -56,10 +56,10 @@ Based on company profile analysis, we assume BrightThread uses a mix of SaaS too
 
 | Function | Assumed Solution | Notes |
 |:---------|:-----------------|:------|
-| **Ecommerce/Ordering** | Custom-built platform | Direct database access mentioned in requirements |
-| **Inventory/Production** | ERP (NetSuite or similar) | Source of truth for stock levels |
-| **CRM/Tickets** | Zendesk | Where CX logs interactions |
-| **Payments** | Stripe | Handles charges and refunds |
+| **Ecommerce/Ordering** | BrightThread (custom-built) | Direct database access; we integrate via existing Python service APIs |
+| **Inventory/Production** | NetSuite | Source of truth for stock levels; inventory + production via API |
+| **CRM/Tickets** | Zendesk | Where CX logs interactions; escalation workflow lives here |
+| **Payments** | Stripe | Handles charges and refunds for order modifications |
 
 ### The "Multiple Systems" Problem
 
