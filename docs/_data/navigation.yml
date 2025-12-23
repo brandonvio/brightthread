@@ -5,8 +5,6 @@ docs:
         url: /
       - title: "Design Document"
         url: /design-document/
-      - title: "Architecture"
-        url: /architecture/
       - title: "Proof of Concept"
         url: /poc/
   - title: "Appendix"
