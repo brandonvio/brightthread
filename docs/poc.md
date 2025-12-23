@@ -22,6 +22,7 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 | **Service Layer** | Functional | Order, inventory, and policy services backed by real database tables (seeded/demo data) |
 | **PostgreSQL** | Functional | Real database used by services (local Postgres or RDS in AWS) |
 | **CDK Infrastructure** | Complete | Lambda, API Gateway, DynamoDB, RDS stacks |
+| **React Frontend** | Functional | Chat interface for agent conversations |
 
 ### What Was NOT Built (Production Requirements)
 
@@ -31,7 +32,6 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 | CRM integration | Not built | Out of scope for PoC |
 | Shipping API integration | Not built | Out of scope for PoC |
 | Policy RAG (OpenSearch) | Not built | PoC loads the full policy document into model context instead of vector retrieval |
-| React frontend | Not started | Backend-first approach |
 | Authentication | Simplified | Dev/test bearer token containing a user_id |
 | Zendesk escalation | Stubbed | API call placeholder only |
 
@@ -42,88 +42,39 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 ### Production Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Client
-        UI[React Portal]
-    end
+flowchart TB
+    UI[React Portal] --> Cognito[Cognito Auth]
+    UI --> CDN[CloudFront + WAF]
+    CDN --> ALB[Load Balancer]
 
-    subgraph Auth
-        Cognito["Cognito (JWT)"]
-    end
+    ALB --> Agent[CX Order Agent<br/>ECS Fargate]
+    ALB --> Platform[B2B Platform Services<br/>ECS Fargate]
 
-    subgraph Edge
-        CDN[CloudFront + WAF]
-        ALB[Load Balancer]
-    end
+    Agent --> Bedrock[Claude via Bedrock]
+    Agent --> OS[(OpenSearch)]
+    Agent --> DDB[(DynamoDB)]
+    Agent --> Platform
 
-    subgraph Services
-        AgentSvc["CX Order Agent<br/>(ECS Fargate)"]
-        PlatformSvc["B2B Platform Services<br/>(ECS Fargate)"]
-    end
-
-    subgraph AI
-        Bedrock[Claude via Bedrock]
-        OS[(OpenSearch<br/>Policy Vectors)]
-    end
-
-    subgraph Data
-        DDB[(DynamoDB)]
-        RDS[(PostgreSQL)]
-    end
-
-    subgraph External
-        ERP[ERP]
-        CRM[CRM]
-        Shipping[Shipping]
-    end
-
-    UI --> Cognito
-    UI --> CDN --> ALB
-    ALB --> AgentSvc
-    ALB --> PlatformSvc
-    AgentSvc --> Bedrock
-    AgentSvc --> OS
-    AgentSvc --> DDB
-    AgentSvc --> PlatformSvc
-    PlatformSvc --> RDS
-    PlatformSvc --> ERP
-    PlatformSvc --> CRM
-    PlatformSvc --> Shipping
+    Platform --> RDS[(PostgreSQL)]
+    Platform --> ERP[ERP]
+    Platform --> CRM[CRM]
+    Platform --> Ship[Shipping]
 ```
 
 ### PoC Architecture
 
 ```mermaid
-flowchart LR
-    subgraph Client
-        CLI[curl / Postman]
-    end
+flowchart TB
+    UI[React Portal] --> APIGW[API Gateway]
+    APIGW --> Lambda[Lambda + FastAPI]
 
-    subgraph API
-        APIGW[API Gateway]
-        Lambda["Lambda (FastAPI)"]
-    end
+    Lambda --> Agent[LangGraph Agent]
+    Lambda --> Svc[Services Layer]
 
-    subgraph Agent
-        LG["LangGraph Agent"]
-        Bedrock[Claude via Bedrock]
-    end
+    Agent --> Bedrock[Claude via Bedrock]
+    Agent --> DDB[(DynamoDB)]
 
-    subgraph Data
-        DDB[(DynamoDB)]
-        DB[(PostgreSQL)]
-    end
-
-    subgraph Services
-        Svc["Functional Services<br/>(Orders, Inventory, Policies)"]
-    end
-
-    CLI --> APIGW --> Lambda
-    Lambda --> LG
-    LG --> Bedrock
-    LG --> DDB
-    Lambda --> Svc
-    Svc --> DB
+    Svc --> RDS[(PostgreSQL)]
 
     style Svc fill:#EBCB8B,stroke:#D08770,color:#2E3440
 ```
@@ -132,7 +83,7 @@ flowchart LR
 - PoC uses **Lambda** instead of ECS Fargate
 - PoC uses **real database-backed services** (PostgreSQL) for orders/inventory/policies
 - PoC does **not** integrate with external systems (no ERP/CRM/shipping)
-- CLI/curl testing instead of React frontend
+- PoC uses **simplified authentication** (dev/test bearer token) instead of Cognito
 
 ---
 
@@ -344,6 +295,7 @@ cdk deploy --all
 | Conversation persistence | ✅ DynamoDB with TTL |
 | LLM integration | ✅ Bedrock + LangChain |
 | Policy context loading | ✅ Policy document loaded into prompt context |
+| React chat interface | ✅ Vite + React frontend |
 
 ### 7.3 Not Demonstrated (Future Work)
 
@@ -352,7 +304,7 @@ cdk deploy --all
 | External integrations (ERP/CRM/shipping) | Not included in PoC |
 | Policy RAG (vector retrieval) | Production design uses OpenSearch; PoC loads full policy doc into context |
 | Escalation to Zendesk | API call is stubbed |
-| Frontend UI | Backend-first approach |
+| Production authentication | PoC uses simplified dev/test bearer token |
 
 ---
 

@@ -78,10 +78,10 @@ This design prioritizes being **performant, modular, scalable, reliable, observa
 
 ```mermaid
 flowchart TB
-    C[BrightThread B2B Customer<br/>(web browser)]
+    C["BrightThread B2B Customer<br/>(web browser)"]
 
     CF[WAF/CloudFront]
-    Cog[Cognito<br/>(issues JWT)]
+    Cog["Cognito<br/>(issues JWT)"]
     ALB[Application Load Balancer]
 
     subgraph Platform["BrightThread B2B Platform ECS Services"]
@@ -171,12 +171,12 @@ flowchart TB
 
     subgraph Enforcement["Policy Enforcement (Services)"]
         SVC[Python Services]
-        RULES[(Business Rules<br/>Hard Logic)]
+        RULES[("Business Rules<br/>Hard Logic")]
     end
 
     subgraph Explanation["Policy Explanation (RAG)"]
-        OS3[(OpenSearch<br/>Vector Search)]
-        DOCS[(Policy chunks + embeddings<br/>(sourced from Confluence))]
+        OS3[("OpenSearch<br/>Vector Search")]
+        DOCS[("Policy chunks + embeddings<br/>(sourced from Confluence)")]
     end
 
     subgraph Response["Agent Response"]
@@ -276,12 +276,12 @@ For additional diagrams (flows and observability visuals), see the [Architecture
 
 ### 4.1 Existing Systems
 
-| System | Vendor (Example) | Implication |
-|:-------|:------------------|:------------|
+| System | Vendor | Implication |
+|:-------|:-------|:------------|
 | E-commerce Platform | BrightThread (custom-built) | We integrate via existing Python service APIs |
-| ERP | ERP/WMS (e.g., Odoo) | Inventory + production via API |
-| CRM / Support | Ticketing system (e.g., Zendesk) | Escalation workflow lives here |
-| Shipping | Shipping provider (e.g., Shippo) | Rates, labels, tracking via API |
+| ERP / Inventory | NetSuite | Source of truth for stock levels; inventory + production via API |
+| CRM / Support | Zendesk | Escalation workflow lives here; where CX logs interactions |
+| Payments | Stripe | Handles charges and refunds for order modifications |
 
 ### 4.2 Operational Context
 
@@ -477,22 +477,25 @@ The agent escalates to human CX agents when:
 
 ## 10. Proof of Concept
 
-A working PoC demonstrates the core agent pattern:
+A working PoC demonstrates the core agent pattern with a live customer portal:
 
 | Component | Status |
 |:----------|:-------|
-| LangGraph agent with Bedrock | ✅ Functional |
-| Policy handling (PoC) | ✅ Functional (loads the full policy markdown document into agent/node context) |
-| OpenSearch policy retrieval (prod design) | 🧩 Designed (embedding + vector retrieval; not required for PoC) |
+| React customer portal | ✅ Live |
+| LangGraph order support agent | ✅ Functional |
+| Claude via Amazon Bedrock | ✅ Integrated |
+| Policy handling (full document in context) | ✅ Functional |
 | DynamoDB conversation persistence | ✅ Functional |
-| FastAPI backend with emulated services | ✅ Functional |
+| FastAPI backend (Lambda) | ✅ Deployed |
+| Emulated platform services (orders, inventory, policies) | ✅ Functional |
 | AWS CDK infrastructure | ✅ Complete |
 
-The PoC uses mock data instead of real integrations, demonstrating the architecture pattern without external dependencies.
+The PoC uses emulated platform services with mock data, demonstrating the full architecture pattern without external system dependencies.
 
-**PoC vs. production design difference (policy knowledge):**
-- **PoC**: consumes the entire policy markdown document directly in the agent context (no embeddings/vector search).
-- **Production**: embeds/chunks policy documents from a versioned repository (e.g., Confluence) and retrieves relevant chunks from **OpenSearch** as needed to explain decisions.
+**PoC simplifications:**
+- **No OpenSearch**: Policy document loaded directly into agent context (no RAG/vector retrieval)
+- **No external integrations**: Orders, inventory, and policies served by emulated services
+- **Simplified auth**: Dev/test bearer token instead of Cognito
 
 See [Proof of Concept](/poc/) for details.
 
