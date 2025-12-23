@@ -19,6 +19,7 @@ class Intent(StrEnum):
     ORDER_CHANGE = "ORDER_CHANGE"
     CONFIRMATION = "CONFIRMATION"
     POLICY_CONFIRMATION = "POLICY_CONFIRMATION"
+    INVENTORY_CONFIRMATION = "INVENTORY_CONFIRMATION"
     OFF_TOPIC = "OFF_TOPIC"
     UNCLEAR = "UNCLEAR"
 
@@ -133,3 +134,35 @@ class PolicyConfirmationStatus(StrEnum):
     PENDING = "pending"
     ACCEPTED = "accepted"
     REJECTED = "rejected"
+
+
+class InventoryConfirmationStatus(StrEnum):
+    """Status of user confirmation for inventory alternatives."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
+class InventoryChoice(StrEnum):
+    """User's choice when inventory is insufficient."""
+
+    PROCEED_PARTIAL = "proceed_partial"  # Accept available quantity
+    SELECT_ALTERNATIVE = "select_alternative"  # Choose a different size/color
+    CANCEL = "cancel"  # Cancel the modification
+
+
+class InventoryChoiceOutput(BaseModel):
+    """Structured output for inventory choice interpretation."""
+
+    choice: InventoryChoice = Field(..., description="User's inventory choice")
+    selected_quantity: int | None = Field(
+        default=None, description="Quantity if proceeding with partial"
+    )
+    selected_size: str | None = Field(
+        default=None, description="Selected alternative size"
+    )
+    selected_color: str | None = Field(
+        default=None, description="Selected alternative color"
+    )
+    reasoning: str = Field(default="", description="Short reasoning for debugging")

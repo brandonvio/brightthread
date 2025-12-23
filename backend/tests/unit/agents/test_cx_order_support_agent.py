@@ -7,6 +7,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from agents.cx_order_support_agent import AgentState, CXOrderSupportAgent
 from agents.models.cx_order_support import Intent, PendingModificationStatus
+from agents.tools.inventory_tool import InventoryTool
 from agents.tools.policy_tool import PolicyDecision, PolicyTool
 
 
@@ -50,12 +51,40 @@ def mock_policy_tool() -> Mock:
         denial_reason=None,
         requires_confirmation=False,
         escalate_to_support=False,
-        model_dump=Mock(return_value={
-            "decision": "allowed",
-            "change_type": "quantity_decrease",
-            "order_status": "CREATED",
-        }),
+        model_dump=Mock(
+            return_value={
+                "decision": "allowed",
+                "change_type": "quantity_decrease",
+                "order_status": "CREATED",
+            }
+        ),
     )
+    return mock
+
+
+@pytest.fixture
+def mock_inventory_tool() -> Mock:
+    """Create mock InventoryTool."""
+    mock = Mock(spec=InventoryTool)
+    # Default to available inventory
+    mock.check_availability.return_value = Mock(
+        available=True,
+        requested_qty=10,
+        available_qty=100,
+        product_name="Test Product",
+        size_name="Medium",
+        color_name="Blue",
+        alternatives=[],
+        model_dump=Mock(
+            return_value={
+                "available": True,
+                "requested_qty": 10,
+                "available_qty": 100,
+                "alternatives": [],
+            }
+        ),
+    )
+    mock.get_alternatives.return_value = []
     return mock
 
 
@@ -72,6 +101,7 @@ def agent(
     mock_model: Mock,
     mock_order_tools: Mock,
     mock_policy_tool: Mock,
+    mock_inventory_tool: Mock,
 ) -> CXOrderSupportAgent:
     """Create agent instance with mocked dependencies."""
     return CXOrderSupportAgent(
@@ -80,6 +110,7 @@ def agent(
         model=mock_model,
         order_tools=mock_order_tools,
         policy_tool=mock_policy_tool,
+        inventory_tool=mock_inventory_tool,
     )
 
 
@@ -99,6 +130,8 @@ def test_intent_classification_order_change(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._intent_classification(state)
@@ -122,6 +155,8 @@ def test_intent_classification_order_inquiry(agent: CXOrderSupportAgent) -> None
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._intent_classification(state)
@@ -145,6 +180,8 @@ def test_intent_classification_off_topic(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._intent_classification(state)
@@ -168,6 +205,8 @@ def test_intent_classification_invalid_response(agent: CXOrderSupportAgent) -> N
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._intent_classification(state)
@@ -192,6 +231,8 @@ def test_off_topic_response(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._off_topic_response(state)
@@ -224,6 +265,8 @@ def test_fetch_order_details(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._fetch_order_details(state)
@@ -253,6 +296,8 @@ def test_order_summary(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._order_summary(state)
@@ -292,6 +337,8 @@ def test_confirm_understanding_confirmed(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": PendingModificationStatus.PENDING,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._confirm_understanding(state)
@@ -329,6 +376,8 @@ def test_confirm_understanding_rejected(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": PendingModificationStatus.PENDING,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._confirm_understanding(state)
@@ -369,6 +418,8 @@ def test_confirm_understanding_correction(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": PendingModificationStatus.PENDING,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._confirm_understanding(state)
@@ -407,6 +458,8 @@ def test_confirm_understanding_unclear(agent: CXOrderSupportAgent) -> None:
         "pending_modification_status": PendingModificationStatus.PENDING,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     result = agent._confirm_understanding(state)
@@ -431,6 +484,8 @@ def test_process_message_with_order_id(
         "pending_modification_status": None,
         "policy_evaluation": None,
         "policy_confirmation_status": None,
+        "inventory_check": None,
+        "inventory_confirmation_status": None,
     }
 
     agent.graph.invoke = Mock(return_value=mock_graph_result)

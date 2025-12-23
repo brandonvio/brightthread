@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from agents.cx_order_support_agent import CXOrderSupportAgent
 from agents.services.prompt_service import PromptService
 from agents.services.conversation_service import ConversationService
+from agents.tools.inventory_tool import InventoryTool
 from agents.tools.order_tools import OrderTools
 from agents.tools.policy_tool import PolicyTool
 from db.session import get_db_session
@@ -30,6 +31,7 @@ from repositories.order_status_history_repository import OrderStatusHistoryRepos
 from repositories.shipping_address_repository import ShippingAddressRepository
 from repositories.user_repository import UserRepository
 from services.company_service import CompanyService
+from services.inventory_service import InventoryService
 from services.order_service import OrderService
 
 
@@ -121,13 +123,30 @@ def _get_bedrock_model() -> ChatBedrock:
     return ChatBedrock(model_id=model_id, region_name=region)
 
 
+def get_inventory_service(
+    session: Session = Depends(get_db_session),
+) -> InventoryService:
+    """Create InventoryService with injected database session.
+
+    Args:
+        session: SQLAlchemy session for database operations.
+
+    Returns:
+        InventoryService instance.
+    """
+    inventory_repo = InventoryRepository(session)
+    return InventoryService(inventory_repo)
+
+
 def get_cx_agent(
     order_service: OrderService = Depends(get_order_service),
+    inventory_service: InventoryService = Depends(get_inventory_service),
 ) -> CXOrderSupportAgent:
     """Create CXOrderSupportAgent with injected dependencies.
 
     Args:
         order_service: Injected order service with database session.
+        inventory_service: Injected inventory service with database session.
 
     Returns:
         CXOrderSupportAgent instance ready to process messages.
@@ -137,12 +156,14 @@ def get_cx_agent(
     model = _get_bedrock_model()
     order_tools = OrderTools(order_service)
     policy_tool = PolicyTool(model=model, prompt_service=prompt_service)
+    inventory_tool = InventoryTool(inventory_service)
     return CXOrderSupportAgent(
         prompt_service=prompt_service,
         checkpointer=checkpointer,
         model=model,
         order_tools=order_tools,
         policy_tool=policy_tool,
+        inventory_tool=inventory_tool,
     )
 
 

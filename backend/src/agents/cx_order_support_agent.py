@@ -19,6 +19,9 @@ from agents.models.cx_order_support import (
     ConfirmationInterpretationOutput,
     Intent,
     IntentClassificationOutput,
+    InventoryChoice,
+    InventoryChoiceOutput,
+    InventoryConfirmationStatus,
     ModificationAction,
     PendingModification,
     PendingModificationStatus,
@@ -31,6 +34,7 @@ from agents.tools.order_tools import (
     LineItemNotFoundError,
     OrderTools,
 )
+from agents.tools.inventory_tool import InventoryTool
 from agents.tools.policy_tool import (
     ChangeType,
     PolicyDecision,
@@ -54,6 +58,9 @@ class AgentState(TypedDict):
     # Policy evaluation state
     policy_evaluation: dict[str, Any] | None
     policy_confirmation_status: PolicyConfirmationStatus | None
+    # Inventory check state
+    inventory_check: dict[str, Any] | None
+    inventory_confirmation_status: InventoryConfirmationStatus | None
 
 
 class CXOrderSupportAgent:
@@ -66,6 +73,7 @@ class CXOrderSupportAgent:
         model: ChatBedrock,
         order_tools: OrderTools,
         policy_tool: PolicyTool,
+        inventory_tool: InventoryTool,
     ) -> None:
         """Initialize agent with prompt service and checkpointer dependencies.
 
@@ -75,12 +83,14 @@ class CXOrderSupportAgent:
             model: Bedrock chat model client
             order_tools: Tools wrapper for order operations
             policy_tool: Tool for evaluating order change policies
+            inventory_tool: Tool for checking inventory availability
         """
         self.prompt_service = prompt_service
         self.checkpointer = checkpointer
         self.model = model
         self.order_tools = order_tools
         self.policy_tool = policy_tool
+        self.inventory_tool = inventory_tool
         self.system_prompt = self.prompt_service.load_system_prompt(
             "cx_order_support_agent"
         )
@@ -108,19 +118,27 @@ class CXOrderSupportAgent:
         workflow.add_node(
             "policy_condition_confirmation", self._policy_condition_confirmation
         )
+        workflow.add_node("inventory_check", self._inventory_check)
+        workflow.add_node(
+            "inventory_options_response", self._inventory_options_response
+        )
+        workflow.add_node(
+            "inventory_option_confirmation", self._inventory_option_confirmation
+        )
         workflow.add_node("execute_modification", self._execute_modification_node)
 
         workflow.set_entry_point("intent_classification")
 
         workflow.add_conditional_edges(
             "intent_classification",
-            lambda state: state["intent"],
+            self._route_after_intent_classification,
             {
                 Intent.OFF_TOPIC: "off_topic_response",
                 Intent.ORDER_INQUIRY: "order_summary",
                 Intent.ORDER_CHANGE: "fetch_order_details",
                 Intent.CONFIRMATION: "confirm_understanding",
                 Intent.POLICY_CONFIRMATION: "policy_condition_confirmation",
+                Intent.INVENTORY_CONFIRMATION: "inventory_option_confirmation",
                 Intent.UNCLEAR: "unclear_intent_response",
             },
         )
@@ -144,11 +162,12 @@ class CXOrderSupportAgent:
         )
 
         # Policy evaluation routes based on decision
+        # If allowed, go to inventory check before execution
         workflow.add_conditional_edges(
             "policy_evaluation",
             self._route_after_policy_evaluation,
             {
-                "execute": "execute_modification",
+                "inventory_check": "inventory_check",
                 "conditional": "policy_condition_response",
                 "denied": "__end__",
             },
@@ -156,10 +175,33 @@ class CXOrderSupportAgent:
 
         workflow.add_edge("policy_condition_response", "__end__")
 
-        # When user confirms/rejects policy conditions
+        # When user confirms/rejects policy conditions, go to inventory check
         workflow.add_conditional_edges(
             "policy_condition_confirmation",
             self._route_after_policy_condition_confirmation,
+            {
+                "inventory_check": "inventory_check",
+                "cancelled": "__end__",
+            },
+        )
+
+        # Inventory check routes based on availability
+        workflow.add_conditional_edges(
+            "inventory_check",
+            self._route_after_inventory_check,
+            {
+                "execute": "execute_modification",
+                "insufficient": "inventory_options_response",
+                "no_stock": "__end__",
+            },
+        )
+
+        workflow.add_edge("inventory_options_response", "__end__")
+
+        # When user responds to inventory options
+        workflow.add_conditional_edges(
+            "inventory_option_confirmation",
+            self._route_after_inventory_option_confirmation,
             {
                 "execute": "execute_modification",
                 "cancelled": "__end__",
@@ -830,11 +872,11 @@ class CXOrderSupportAgent:
         """Route after policy evaluation based on decision."""
         policy_eval = state.get("policy_evaluation")
         if policy_eval is None:
-            return "end"
+            return "denied"
 
         decision = policy_eval.get("decision")
         if decision == PolicyDecision.ALLOWED.value:
-            return "execute"
+            return "inventory_check"
         elif decision == PolicyDecision.CONDITIONAL.value:
             return "conditional"
         else:
@@ -970,6 +1012,420 @@ class CXOrderSupportAgent:
         """Route after policy condition confirmation."""
         policy_status = state.get("policy_confirmation_status")
         if policy_status == PolicyConfirmationStatus.ACCEPTED.value:
+            return "inventory_check"
+        return "cancelled"
+
+    def _route_after_intent_classification(self, state: AgentState) -> Intent:
+        """Route after intent classification, checking for pending inventory confirmation."""
+        # Check if we're waiting for inventory confirmation
+        inventory_status = state.get("inventory_confirmation_status")
+        if inventory_status == InventoryConfirmationStatus.PENDING:
+            return Intent.INVENTORY_CONFIRMATION
+
+        return state["intent"]
+
+    def _inventory_check(self, state: AgentState) -> AgentState:
+        """Check inventory availability for the pending modification.
+
+        Called after policy evaluation passes. Checks if sufficient inventory
+        is available for the requested change.
+
+        Args:
+            state: Current agent state with pending modification
+
+        Returns:
+            Updated state with inventory check result
+        """
+        pending_raw = state.get("pending_modification")
+        if pending_raw is None:
+            state["response"] = "No pending modification to check inventory for."
+            state["inventory_check"] = None
+            return state
+
+        pending_mod = PendingModification.model_validate(pending_raw)
+        order_details = state.get("order_details", {})
+
+        # Find the line item to get product/size/color IDs
+        line_items = order_details.get("line_items", [])
+        target_item = None
+        for item in line_items:
+            if (
+                item.get("product_name", "").lower() == pending_mod.product_name.lower()
+                and item.get("size", "").lower() == pending_mod.size_name.lower()
+                and item.get("color", "").lower() == pending_mod.color_name.lower()
+            ):
+                target_item = item
+                break
+
+        if target_item is None:
+            state["response"] = "Could not find the item in your order."
+            state["inventory_check"] = None
+            return state
+
+        # Determine what quantity to check based on modification type
+        quantity_to_check = self._calculate_inventory_requirement(
+            pending_mod, target_item
+        )
+
+        # If no inventory check needed (e.g., quantity decrease), proceed
+        if quantity_to_check <= 0:
+            logger.info("No additional inventory needed, proceeding to execute")
+            state["inventory_check"] = {
+                "available": True,
+                "requested_qty": 0,
+                "available_qty": 0,
+                "alternatives": [],
+            }
+            return state
+
+        # Get IDs for inventory lookup from the inventory record
+        # The line item only has inventory_id, we need to look up the inventory
+        # to get product_id, color_id, size_id
+        inventory_id = uuid.UUID(target_item.get("inventory_id"))
+        inventory = self.order_tools._order_service._inventory_repo.get_by_id(
+            inventory_id
+        )
+        product_id = inventory.product_id
+        color_id = inventory.color_id
+        size_id = inventory.size_id
+
+        # Determine if we're checking for a different size/color
+        check_size_id = size_id
+        check_color_id = color_id
+        check_size_name = pending_mod.size_name
+        check_color_name = pending_mod.color_name
+
+        if pending_mod.new_size:
+            # Need to resolve new size to ID
+            new_size_inventory = self._resolve_size_inventory(
+                product_id, pending_mod.new_size, inventory
+            )
+            if new_size_inventory:
+                check_size_id = new_size_inventory["size_id"]
+                check_size_name = pending_mod.new_size
+
+        if pending_mod.new_color:
+            # Need to resolve new color to ID
+            new_color_inventory = self._resolve_color_inventory(
+                product_id, pending_mod.new_color, inventory
+            )
+            if new_color_inventory:
+                check_color_id = new_color_inventory["color_id"]
+                check_color_name = pending_mod.new_color
+
+        # Check inventory availability
+        inventory_result = self.inventory_tool.check_availability(
+            product_id=product_id,
+            color_id=check_color_id,
+            size_id=check_size_id,
+            quantity=quantity_to_check,
+            product_name=pending_mod.product_name,
+            size_name=check_size_name,
+            color_name=check_color_name,
+        )
+
+        state["inventory_check"] = inventory_result.model_dump(mode="json")
+
+        logger.info(
+            f"Inventory check: requested={quantity_to_check}, "
+            f"available={inventory_result.available_qty}, "
+            f"sufficient={inventory_result.available}"
+        )
+
+        if not inventory_result.available:
+            # Set pending status for user response
+            state["inventory_confirmation_status"] = InventoryConfirmationStatus.PENDING
+
+        return state
+
+    def _calculate_inventory_requirement(
+        self, modification: PendingModification, line_item: dict[str, Any]
+    ) -> int:
+        """Calculate how much additional inventory is needed for a modification.
+
+        Args:
+            modification: The pending modification
+            line_item: The current line item data
+
+        Returns:
+            Additional inventory quantity needed (0 or negative if no check needed)
+        """
+        current_qty = line_item.get("quantity", 0)
+
+        if modification.action == ModificationAction.REMOVE_ITEM:
+            return 0  # Removing doesn't need inventory
+
+        if modification.new_size or modification.new_color:
+            # Size/color change needs full quantity in new variant
+            return modification.new_quantity or current_qty
+
+        if modification.new_quantity is not None:
+            if modification.new_quantity > current_qty:
+                # Quantity increase - need additional inventory
+                return modification.new_quantity - current_qty
+            else:
+                # Quantity decrease - no additional inventory needed
+                return 0
+
+        return 0
+
+    def _resolve_size_inventory(
+        self, product_id: uuid.UUID, size_name: str, current_inventory: Any
+    ) -> dict[str, Any] | None:
+        """Resolve a size name to inventory IDs.
+
+        Args:
+            product_id: Product UUID
+            size_name: Size name to resolve
+            current_inventory: Current inventory record for fallback color
+
+        Returns:
+            Dict with size_id and color_id, or None if not found
+        """
+        # Get available sizes for this product
+        available_sizes = (
+            self.order_tools._order_service.get_available_sizes_for_product(product_id)
+        )
+        for size in available_sizes:
+            if size["name"].lower() == size_name.lower():
+                return {
+                    "size_id": uuid.UUID(size["id"]),
+                    "color_id": current_inventory.color_id,
+                }
+        return None
+
+    def _resolve_color_inventory(
+        self, product_id: uuid.UUID, color_name: str, current_inventory: Any
+    ) -> dict[str, Any] | None:
+        """Resolve a color name to inventory IDs.
+
+        Args:
+            product_id: Product UUID
+            color_name: Color name to resolve
+            current_inventory: Current inventory record for fallback size
+
+        Returns:
+            Dict with size_id and color_id, or None if not found
+        """
+        # Get available colors for this product
+        available_colors = (
+            self.order_tools._order_service.get_available_colors_for_product(product_id)
+        )
+        for color in available_colors:
+            if color["name"].lower() == color_name.lower():
+                return {
+                    "color_id": uuid.UUID(color["id"]),
+                    "size_id": current_inventory.size_id,
+                }
+        return None
+
+    def _route_after_inventory_check(self, state: AgentState) -> str:
+        """Route after inventory check based on availability."""
+        inventory_check = state.get("inventory_check")
+        if inventory_check is None:
+            return "no_stock"
+
+        if inventory_check.get("available"):
+            return "execute"
+
+        # Check if there are alternatives or partial availability
+        available_qty = inventory_check.get("available_qty", 0)
+        alternatives = inventory_check.get("alternatives", [])
+
+        if available_qty > 0 or alternatives:
+            return "insufficient"
+
+        return "no_stock"
+
+    def _inventory_options_response(self, state: AgentState) -> AgentState:
+        """Generate response presenting inventory options to user.
+
+        Args:
+            state: Current agent state with inventory check result
+
+        Returns:
+            Updated state with options response
+        """
+        inventory_check = state.get("inventory_check")
+        if inventory_check is None:
+            state["response"] = "Something went wrong checking inventory."
+            return state
+
+        pending_raw = state.get("pending_modification")
+        order_details = state.get("order_details", {})
+
+        # Use LLM to generate natural response
+        insufficient_prompt = self.prompt_service.load_system_prompt(
+            "cx_inventory_insufficient"
+        )
+
+        context = {
+            "order_details": order_details,
+            "pending_modification": pending_raw,
+            "inventory_check": inventory_check,
+        }
+
+        messages = [
+            SystemMessage(content=insufficient_prompt),
+            HumanMessage(
+                content=f"Context:\n{json.dumps(context, indent=2, default=str)}"
+            ),
+        ]
+
+        response = self.model.invoke(messages)
+        state["response"] = self._extract_llm_text(response.content)
+
+        logger.debug("Generated inventory options response via LLM")
+
+        return state
+
+    def _inventory_option_confirmation(self, state: AgentState) -> AgentState:
+        """Process user's response to inventory options.
+
+        Args:
+            state: Current agent state with user's choice
+
+        Returns:
+            Updated state with updated modification or cancellation
+        """
+        user_message = state["messages"][-1].content
+        inventory_check = state.get("inventory_check")
+        pending_raw = state.get("pending_modification")
+
+        logger.debug(f"Processing inventory option confirmation: {user_message}")
+
+        if pending_raw is None or inventory_check is None:
+            state["response"] = (
+                "I don't have a pending change. What would you like to do?"
+            )
+            state["inventory_confirmation_status"] = None
+            return state
+
+        # Interpret user's choice
+        choice = self._interpret_inventory_choice(
+            user_message, inventory_check, pending_raw
+        )
+
+        logger.info(f"Inventory choice interpretation: {choice.model_dump()}")
+
+        if choice.choice == InventoryChoice.PROCEED_PARTIAL:
+            # Update quantity to available amount
+            pending_mod = PendingModification.model_validate(pending_raw)
+            updated_mod = PendingModification.model_validate(
+                pending_mod.model_dump()
+                | {
+                    "new_quantity": choice.selected_quantity
+                    or inventory_check.get("available_qty")
+                }
+            )
+            state["pending_modification"] = updated_mod.model_dump()
+            state["inventory_confirmation_status"] = (
+                InventoryConfirmationStatus.ACCEPTED
+            )
+            state["response"] = ""
+
+        elif choice.choice == InventoryChoice.SELECT_ALTERNATIVE:
+            # Update to selected alternative
+            pending_mod = PendingModification.model_validate(pending_raw)
+            updates: dict[str, Any] = {}
+            if choice.selected_size:
+                updates["new_size"] = choice.selected_size
+                updates["size_name"] = choice.selected_size
+            if choice.selected_color:
+                updates["new_color"] = choice.selected_color
+                updates["color_name"] = choice.selected_color
+
+            updated_mod = PendingModification.model_validate(
+                pending_mod.model_dump() | updates
+            )
+            state["pending_modification"] = updated_mod.model_dump()
+            state["inventory_confirmation_status"] = (
+                InventoryConfirmationStatus.ACCEPTED
+            )
+            state["response"] = ""
+
+        elif choice.choice == InventoryChoice.CANCEL:
+            state["inventory_confirmation_status"] = (
+                InventoryConfirmationStatus.REJECTED
+            )
+            state["response"] = (
+                "No problem, I've cancelled that change. "
+                "Is there something else I can help you with regarding your order?"
+            )
+            state["pending_modification"] = None
+            state["pending_modification_status"] = PendingModificationStatus.CANCELLED
+
+        else:
+            # Unclear - ask again
+            state["response"] = (
+                "I'm not sure what you'd like to do. Would you like to proceed with "
+                "the available quantity, choose a different option, or cancel?"
+            )
+
+        return state
+
+    def _interpret_inventory_choice(
+        self,
+        user_message: str,
+        inventory_check: dict[str, Any],
+        pending_modification: dict[str, Any],
+    ) -> InventoryChoiceOutput:
+        """Interpret user's response to inventory options.
+
+        Args:
+            user_message: User's response
+            inventory_check: Inventory check result with alternatives
+            pending_modification: The pending modification
+
+        Returns:
+            Interpreted choice
+        """
+        interpret_prompt = self.prompt_service.load_system_prompt(
+            "cx_interpret_inventory_choice"
+        )
+
+        context = {
+            "inventory_check": inventory_check,
+            "pending_modification": pending_modification,
+            "user_message": user_message,
+        }
+
+        messages = [
+            SystemMessage(content=interpret_prompt),
+            HumanMessage(
+                content=f"Context:\n{json.dumps(context, indent=2, default=str)}"
+            ),
+        ]
+
+        response = self.model.invoke(messages)
+        content = self._strip_code_fences(self._extract_llm_text(response.content))
+
+        try:
+            return self._parse_inventory_choice(content)
+        except (JSONDecodeError, ValidationError):
+            repaired = self._repair_json_once(
+                schema_name="InventoryChoiceOutput",
+                schema=InventoryChoiceOutput.model_json_schema(),
+                bad_output=content,
+            )
+            try:
+                return self._parse_inventory_choice(repaired)
+            except (JSONDecodeError, ValidationError):
+                logger.error(f"Failed to parse inventory choice: {content!r}")
+                return InventoryChoiceOutput(
+                    choice=InventoryChoice.CANCEL,
+                    reasoning="Failed to parse LLM response",
+                )
+
+    def _parse_inventory_choice(self, content: str) -> InventoryChoiceOutput:
+        """Parse inventory choice JSON response."""
+        parsed: dict[str, Any] = json.loads(content)
+        return InventoryChoiceOutput.model_validate(parsed)
+
+    def _route_after_inventory_option_confirmation(self, state: AgentState) -> str:
+        """Route after user responds to inventory options."""
+        inventory_status = state.get("inventory_confirmation_status")
+        if inventory_status == InventoryConfirmationStatus.ACCEPTED.value:
             return "execute"
         return "cancelled"
 
@@ -1063,6 +1519,8 @@ class CXOrderSupportAgent:
         previous_modification_status = None
         previous_policy_evaluation = None
         previous_policy_confirmation_status = None
+        previous_inventory_check = None
+        previous_inventory_confirmation_status = None
         checkpoint = self.checkpointer.get(config)
         if checkpoint and "channel_values" in checkpoint:
             channel_values = checkpoint["channel_values"]
@@ -1076,11 +1534,16 @@ class CXOrderSupportAgent:
             previous_policy_confirmation_status = channel_values.get(
                 "policy_confirmation_status"
             )
+            previous_inventory_check = channel_values.get("inventory_check")
+            previous_inventory_confirmation_status = channel_values.get(
+                "inventory_confirmation_status"
+            )
             logger.debug(
                 "Retrieved previous state: "
                 f"pending_modification_id={previous_modification_id}, "
                 f"pending_modification_status={previous_modification_status}, "
-                f"policy_confirmation_status={previous_policy_confirmation_status}"
+                f"policy_confirmation_status={previous_policy_confirmation_status}, "
+                f"inventory_confirmation_status={previous_inventory_confirmation_status}"
             )
 
         initial_state: AgentState = {
@@ -1095,6 +1558,8 @@ class CXOrderSupportAgent:
             "pending_modification_status": previous_modification_status,
             "policy_evaluation": previous_policy_evaluation,
             "policy_confirmation_status": previous_policy_confirmation_status,
+            "inventory_check": previous_inventory_check,
+            "inventory_confirmation_status": previous_inventory_confirmation_status,
         }
 
         result = self.graph.invoke(initial_state, config)
