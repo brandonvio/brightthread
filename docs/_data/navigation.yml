@@ -11,8 +11,6 @@ docs:
     children:
       - title: "Assumptions"
         url: /appendix/assumptions/
-      - title: "Architecture Diagrams"
-        url: /appendix/architecture-diagrams/
       - title: "Tradeoffs"
         url: /appendix/tradeoffs/
       - title: "Data Model"

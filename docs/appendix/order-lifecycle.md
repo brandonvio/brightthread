@@ -13,59 +13,20 @@ Orders progress through a series of states from creation to delivery. The polici
 
 ```mermaid
 stateDiagram-v2
+    direction LR
     [*] --> CREATED: Order placed
     CREATED --> APPROVED: Customer confirms
     CREATED --> CANCELLED: Customer cancels
     APPROVED --> IN_PRODUCTION: Production starts
     APPROVED --> CANCELLED: Customer cancels
     IN_PRODUCTION --> READY_TO_SHIP: Production complete
-    IN_PRODUCTION --> CANCELLED: Customer cancels (partial refund)
+    IN_PRODUCTION --> CANCELLED: Partial refund
     READY_TO_SHIP --> SHIPPED: Carrier pickup
     SHIPPED --> DELIVERED: Delivery confirmed
     DELIVERED --> [*]
     DELIVERED --> RETURNED: Return processed
     RETURNED --> [*]
     CANCELLED --> [*]
-
-    note right of CREATED
-        All changes allowed
-        No cost/delay
-    end note
-
-    note right of APPROVED
-        Most changes allowed
-        Some may incur cost
-    end note
-
-    note right of IN_PRODUCTION
-        All changes possible
-        +25-50% cost, +5-7 days
-    end note
-
-    note right of READY_TO_SHIP
-        Address changes only
-        May add 1 day delay
-    end note
-
-    note right of SHIPPED
-        No changes allowed
-        Contact support
-    end note
-
-    note right of DELIVERED
-        Order complete
-        Return policy applies
-    end note
-
-    note right of RETURNED
-        Return processed
-        Refund issued
-    end note
-
-    note right of CANCELLED
-        Order terminated
-        Refund issued per policy
-    end note
 ```
 
 ---

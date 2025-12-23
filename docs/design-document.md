@@ -82,6 +82,33 @@ sequenceDiagram
     end
 ```
 
+### Order Lifecycle & Change Policies
+
+Orders progress through states where change policies become increasingly restrictive:
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> CREATED
+    CREATED --> APPROVED
+    APPROVED --> IN_PRODUCTION
+    IN_PRODUCTION --> READY_TO_SHIP
+    READY_TO_SHIP --> SHIPPED
+    SHIPPED --> DELIVERED
+    DELIVERED --> [*]
+```
+
+| Status | What's Allowed | Agent Behavior |
+|:-------|:---------------|:---------------|
+| **CREATED** | All changes, no cost/delay | Execute immediately |
+| **APPROVED** | All changes, minor fees possible | Execute with confirmation |
+| **IN_PRODUCTION** | Changes possible but expensive (+25-50% cost, +5-7 days) | Confirm cost/delay, then execute |
+| **READY_TO_SHIP** | Address changes only | Execute address; escalate others |
+| **SHIPPED** | Nothing | Escalate to human support |
+| **DELIVERED** | Nothing (returns handled separately) | Provide order summary |
+
+The agent's value is highest in early states where it can handle requests autonomously. As orders progress, the agent shifts to explanation and escalation.
+
 ---
 
 ## 2. Design Principles (Quality Attributes)
@@ -318,8 +345,6 @@ Use LangSmith to capture agent traces for debugging and evaluation:
 - **Sampling & environments**: enable full tracing by default in dev/staging; use sampling in prod to control cost and data exposure.
 - **PII controls**: redact or omit sensitive fields (addresses, emails, tokens) from trace payloads; never include secrets in prompts.
 
-For additional diagrams (flows and observability visuals), see the [Architecture Diagrams Appendix](/appendix/architecture-diagrams/).
-
 For assumptions about BrightThread's existing technology landscape, see the [Assumptions Appendix](/appendix/assumptions/).
 
 ---
@@ -341,13 +366,35 @@ For detailed analysis of key architectural decisions, see the [Tradeoffs Appendi
 
 The agent escalates to human CX agents when:
 
+```mermaid
+flowchart TD
+    START[Evaluate Request] --> Q1{Customer requested human?}
+    Q1 -->|Yes| ESC[ESCALATE]
+    Q1 -->|No| Q2{Service returned requires_human?}
+
+    Q2 -->|Yes| ESC
+    Q2 -->|No| Q3{Order status = SHIPPED?}
+
+    Q3 -->|Yes| ESC
+    Q3 -->|No| Q4{Clarification attempts > 3?}
+
+    Q4 -->|Yes| ESC
+    Q4 -->|No| Q5{Refund > threshold?}
+
+    Q5 -->|Yes| ESC
+    Q5 -->|No| CONTINUE[Continue Processing]
+
+    ESC --> TICKET[Create Zendesk Ticket]
+    TICKET --> NOTIFY[Notify Customer]
+```
+
 | Trigger | Rationale |
 |:--------|:----------|
 | Customer requests human | Always honor immediately |
 | Service returns `requires_human_review` | Business rules require judgment |
 | Order status is `SHIPPED` | Post-shipment changes are complex |
 | Clarification attempts > 3 | Don't frustrate the customer |
-| Change involves refund > threshold | Financial decisions above agent authority |
+| Refund > threshold | Financial decisions above agent authority |
 
 **Escalation flow:**
 1. Agent creates Zendesk ticket with full transcript + context

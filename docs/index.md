@@ -29,8 +29,7 @@ BrightThread's customers frequently need to modify orders after placement—adju
 
 | Document | Description |
 |:---------|:------------|
-| [Design Document](design-document/) | Architecture overview, key decisions, assumptions, and tradeoffs |
-| [Architecture Diagrams (Appendix)](appendix/architecture-diagrams/) | Full diagram library (flows, internal structure, observability) |
+| [Design Document](design-document/) | Architecture overview, key decisions, and system design |
 | [Proof of Concept](poc/) | What was built, technology choices, and how to run it |
 
 ### Supporting Documentation
