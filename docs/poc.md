@@ -19,19 +19,20 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 | **AWS Bedrock Integration** | Functional | Claude Haiku via LangChain |
 | **DynamoDB Checkpointer** | Functional | Conversation state persistence |
 | **FastAPI Backend** | Functional | REST endpoints for agent + services |
-| **Service Layer** | Emulated | OrderService, InventoryService, PolicyService with mock data |
-| **PostgreSQL** | Schema only | Tables defined, not fully populated |
+| **Service Layer** | Functional | Order, inventory, and policy services backed by real database tables (seeded/demo data) |
+| **PostgreSQL** | Functional | Real database used by services (local Postgres or RDS in AWS) |
 | **CDK Infrastructure** | Complete | Lambda, API Gateway, DynamoDB, RDS stacks |
 
 ### What Was NOT Built (Production Requirements)
 
 | Component | Status | Rationale |
 |:----------|:-------|:----------|
-| Real ERP integration | Mocked | No real ERP system available |
-| Shipping API integration | Mocked | Out of scope for PoC |
+| Real ERP integration | Not built | Out of scope for PoC |
+| CRM integration | Not built | Out of scope for PoC |
+| Shipping API integration | Not built | Out of scope for PoC |
 | Policy RAG (OpenSearch) | Not built | PoC loads the full policy document into model context instead of vector retrieval |
 | React frontend | Not started | Backend-first approach |
-| Authentication | Assumed | User context passed as request param |
+| Authentication | Simplified | Dev/test bearer token containing a user_id |
 | Zendesk escalation | Stubbed | API call placeholder only |
 
 ---
@@ -43,16 +44,22 @@ This document describes the proof-of-concept (PoC) implementation that demonstra
 ```mermaid
 flowchart TB
     subgraph Prod["Production"]
-        UI[React Portal] --> APIGW[API Gateway]
-        APIGW --> ECS[Agent API (ECS Fargate)]
-        ECS --> Agent[LangGraph Agent]
-        Agent --> Bedrock[Claude via Bedrock]
-        Agent --> Services[Python Services]
-        Services --> RDS[(PostgreSQL)]
-        Services --> ERP[Real ERP]
-        Services --> Shipping[Real Shipping API]
-        Agent --> OS[(OpenSearch<br/>Policy Vectors)]
-        Agent --> DDB[(DynamoDB)]
+        UI[React Portal] --> Edge[CloudFront + WAF]
+        UI --> Cognito[Cognito (JWT)]
+        Edge --> ALB[Application Load Balancer]
+
+        ALB --> AgentSvc[CX Order Agent (ECS Fargate)]
+        ALB --> PlatformSvc[B2B Platform Services (ECS Fargate)]
+
+        AgentSvc --> Bedrock[Claude via Bedrock]
+        AgentSvc --> DDB[(DynamoDB)]
+        AgentSvc --> OS[(OpenSearch Policy Vectors)]
+        AgentSvc --> PlatformSvc
+
+        PlatformSvc --> RDS[(PostgreSQL)]
+        PlatformSvc --> ERP[ERP]
+        PlatformSvc --> CRM[CRM]
+        PlatformSvc --> Shipping[Shipping]
     end
 ```
 
@@ -62,21 +69,21 @@ flowchart TB
 flowchart TB
     subgraph PoC["Proof of Concept"]
         CLI[curl / Postman] --> APIGW[API Gateway]
-        APIGW --> Lambda
+        APIGW --> Lambda[Lambda (FastAPI)]
         Lambda --> Agent[LangGraph Agent]
         Agent --> Bedrock[Claude via Bedrock]
-        Agent --> Services[Emulated Services]
-        Services --> MockData[In-Memory Mock Data]
         Agent --> DDB[(DynamoDB)]
+        Lambda --> Services[Functional Services (Orders, Inventory, Policies)]
+        Services --> DB[(PostgreSQL)]
     end
 
     style Services fill:#EBCB8B,stroke:#D08770,color:#2E3440
-    style MockData fill:#EBCB8B,stroke:#D08770,color:#2E3440
 ```
 
 **Key Differences:**
-- Services use in-memory mock data instead of real databases
-- No real ERP/Shipping integrations
+- PoC uses **Lambda** instead of ECS Fargate
+- PoC uses **real database-backed services** (PostgreSQL) for orders/inventory/policies
+- PoC does **not** integrate with external systems (no ERP/CRM/shipping)
 - CLI/curl testing instead of React frontend
 
 ---
@@ -100,8 +107,8 @@ flowchart TB
 |:------|:----------|
 | `BackendServiceStack` | Lambda function, API Gateway |
 | `DynamoDBStack` | Conversations table with TTL |
-| `RDSStack` | PostgreSQL instance (schema only) |
-| `IAMStack` | Execution roles, Bedrock/OpenSearch permissions |
+| `RDSStack` | PostgreSQL instance |
+| `IAMStack` | Execution roles, Bedrock/DynamoDB/RDS permissions |
 | `Route53Stack` | DNS configuration |
 | `CertificateStack` | SSL certificates |
 
@@ -146,23 +153,15 @@ class CXOrderSupportAgent:
         return result["response"]
 ```
 
-### 4.2 Service Layer (Emulated)
+### 4.2 Service Layer (Functional)
 
-Services return mock data that simulates real backend behavior:
+Services are implemented as functional Python services backed by repositories and a real PostgreSQL database (seeded/demo data). They cover core domain flows such as order retrieval, inventory checks, and applying modifications under policy constraints.
 
 ```python
-# backend/src/services/order_service.py
-
-class OrderService:
-    def get_order(self, order_id: str) -> Order:
-        # Returns mock order data
-        return MOCK_ORDERS.get(order_id)
-
-    def check_change_feasibility(self, order_id: str,
-                                  change_type: str) -> FeasibilityResult:
-        order = self.get_order(order_id)
-        # Apply policy rules based on order status
-        return self._evaluate_policy(order, change_type)
+# backend/src/services/order_service.py (conceptual)
+#
+# OrderService composes repositories (OrderRepository, InventoryRepository, ...)
+# and enforces lifecycle rules + inventory constraints using real database data.
 ```
 
 ### 4.3 DynamoDB Checkpointer
@@ -170,13 +169,8 @@ class OrderService:
 Conversation state is persisted to DynamoDB for multi-turn conversations:
 
 ```python
-# Uses langgraph-checkpoint-dynamodb package
-from langgraph.checkpoint.dynamodb import DynamoDBSaver
-
-checkpointer = DynamoDBSaver(
-    table_name="brightthread-conversations",
-    region_name="us-west-2"
-)
+# Uses langgraph-checkpoint-dynamodb (langgraph_checkpoint_dynamodb).
+# The agent checkpointer persists LangGraph checkpoints to DynamoDB.
 ```
 
 ---
@@ -186,37 +180,48 @@ checkpointer = DynamoDBSaver(
 ### 5.1 Agent Endpoint
 
 ```
-POST /agent/chat
+POST /v1/chat/completions
 ```
 
 **Request:**
 ```json
 {
-  "message": "I need to change 20 mediums to large in order #1234",
-  "session_id": "user-123-session-abc",
-  "user_id": "user-123",
-  "order_id": "order-1234"
+  "model": "brightthread-cx-agent",
+  "messages": [
+    { "role": "user", "content": "I need to change 20 mediums to large in order #1234" }
+  ],
+  "order_id": "order-1234",
+  "session_id": "session-optional"
 }
 ```
 
 **Response:**
 ```json
 {
-  "response": "I can help you with that. Let me check if we have 20 large shirts available...",
-  "session_id": "user-123-session-abc",
-  "state": "CHECK_FEASIBILITY"
+  "id": "chatcmpl-xxxxxxxx",
+  "object": "chat.completion",
+  "created": 1730000000,
+  "model": "brightthread-cx-agent",
+  "choices": [
+    {
+      "index": 0,
+      "message": { "role": "assistant", "content": "I can help you with that. Let me check if we have 20 large shirts available..." },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": { "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0 },
+  "session_id": "session-returned"
 }
 ```
 
-### 5.2 Service Endpoints (Mock Data)
+### 5.2 Service Endpoints (PoC)
 
 | Endpoint | Method | Description |
 |:---------|:-------|:------------|
-| `/orders/{id}` | GET | Get order details |
-| `/orders/{id}/check-change` | POST | Check if change is allowed |
-| `/orders/{id}/apply-change` | POST | Apply confirmed change |
-| `/inventory/{product_id}` | GET | Check inventory levels |
-| `/policies/evaluate` | POST | Evaluate policy for change type |
+| `/v1/orders/{id}` | GET | Get order details |
+| `/v1/orders/{id}/check-change` | POST | Check if change is allowed |
+| `/v1/orders/{id}/apply-change` | POST | Apply confirmed change |
+| `/v1/inventory/check-availability` | POST | Check inventory availability |
 
 ---
 
@@ -234,7 +239,9 @@ uv sync
 # Set environment variables
 export AWS_REGION=us-west-2
 export BEDROCK_MODEL_ID=us.anthropic.claude-haiku-4-5-20251001-v1:0
-export DYNAMODB_TABLE_NAME=brightthread-conversations
+export CHECKPOINTS_TABLE_NAME=brightthread-checkpoints
+export CONVERSATIONS_TABLE_NAME=brightthread-conversations
+export DATABASE_URL=postgresql://user:pass@localhost:5432/brightthread
 
 # Run the API server
 uv run uvicorn src.main:app --reload --port 8000
@@ -243,13 +250,17 @@ uv run uvicorn src.main:app --reload --port 8000
 ### 6.2 Test the Agent
 
 ```bash
-# Send a message to the agent
-curl -X POST http://localhost:8000/agent/chat \
+# Send a message to the agent (OpenAI-compatible)
+# Auth is a simple base64-encoded JSON bearer token: {"user_id":"user-123"}
+AUTH_TOKEN=$(printf '{"user_id":"user-123"}' | base64)
+
+curl -X POST http://localhost:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer $AUTH_TOKEN" \
   -d '{
-    "message": "I want to change my order",
-    "session_id": "test-session-1",
-    "user_id": "user-123"
+    "model": "brightthread-cx-agent",
+    "messages": [{ "role": "user", "content": "I want to change my order" }],
+    "order_id": "00000000-0000-0000-0000-000000000000"
   }'
 ```
 
@@ -274,7 +285,7 @@ cdk deploy --all
 | Natural language understanding | ✅ Via Claude |
 | Multi-turn conversation | ✅ Via DynamoDB checkpointer |
 | State machine flow | ✅ Via LangGraph |
-| Service integration pattern | ✅ Via emulated services |
+| Service integration pattern | ✅ Via real, DB-backed services (orders/inventory/policies) |
 
 ### 7.2 Infrastructure Patterns
 
@@ -290,8 +301,8 @@ cdk deploy --all
 
 | Capability | Notes |
 |:-----------|:------|
-| Tool calling | Agent currently uses single-node graph |
-| Real inventory checks | Would require ERP integration |
+| External integrations (ERP/CRM/shipping) | Not included in PoC |
+| Policy RAG (vector retrieval) | Production design uses OpenSearch; PoC loads full policy doc into context |
 | Escalation to Zendesk | API call is stubbed |
 | Frontend UI | Backend-first approach |
 
