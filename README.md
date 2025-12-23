@@ -77,11 +77,11 @@ flowchart TB
         API[FastAPI Agent API]
         Agent[LangGraph Agent]
         Bedrock[Claude via Bedrock]
-        DDB[(DynamoDB<br/>Conversation State)]
-        Policy[Policy Markdown<br/>(full doc in context)]
-        MockSvc[Emulated Platform Services<br/>(mock order + policy enforcement)]
+        DDB["(DynamoDB)\nConversation State"]
+        Policy["Policy Markdown\n(full doc in context)"]
+        MockSvc["Emulated Platform Services\n(mock order + policy enforcement)"]
         CW[CloudWatch Logs/Metrics]
-        LS[LangSmith Traces<br/>(agent observability)]
+        LS["LangSmith Traces\n(agent observability)"]
     end
 
     UI --> API --> Agent
