@@ -46,7 +46,12 @@ def get_database_url() -> str:
     port = os.environ["DB_PORT"]
     db_name = os.environ["DB_NAME"]
 
-    return f"postgresql://{secret['username']}:{secret['password']}@{host}:{port}/{db_name}"
+    raise RuntimeError(
+        f"Database URL: {secret['username']}:{secret['password']}@{host}:{port}/{db_name}"
+    )
+    url = f"postgresql://{secret['username']}:{secret['password']}@{host}:{port}/{db_name}"
+    print(f"Database URL: {url}")
+    return url
 
 
 def _get_engine():

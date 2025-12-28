@@ -102,6 +102,7 @@ jobs:
         working-directory: infrastructure
         env:
           LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           uv run cdk deploy BackendServiceStack \
             --require-approval never \

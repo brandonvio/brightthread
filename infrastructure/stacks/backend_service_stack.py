@@ -128,6 +128,7 @@ class BackendServiceStack(Stack):
             "LOG_LEVEL": "INFO",
             "BEDROCK_MODEL_ID": bedrock_model_id,
             "ENVIRONMENT": os.getenv("ENVIRONMENT", "development"),
+            "DATABASE_URL": os.environ["DATABASE_URL"],
             "DB_SECRET_ARN": db_secret_arn,
             "DB_HOST": db_host,
             "DB_PORT": db_port,

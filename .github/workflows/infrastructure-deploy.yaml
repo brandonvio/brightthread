@@ -76,10 +76,8 @@ jobs:
             CertificateStackPrimary \
             CertificateStackUsEast1 \
             CDNStack \
-            RDSStack \
             DynamoDBStack \
             IAMStack \
-            OpenSearchStack \
             Route53Stack \
             DataDashboardStack \
             --require-approval never

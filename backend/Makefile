@@ -108,3 +108,18 @@ generate-api-docs: ## Generate API documentation (requires local server at local
 	@echo '</body>' >> ../docs/api/index.html
 	@echo '</html>' >> ../docs/api/index.html
 	@echo "$(GREEN)✓ API docs generated at ../docs/api/$(NC)"
+
+migrate-head:
+	@echo "$(BLUE)==> Migrating database to latest version...$(NC)"
+	PYTHONPATH=. uv run alembic upgrade head
+	@echo "$(GREEN)✓ Database migrated to latest version$(NC)"
+
+migrate-down:
+	@echo "$(BLUE)==> Migrating database down...$(NC)"
+	PYTHONPATH=. uv run alembic downgrade -1
+	@echo "$(GREEN)✓ Database migrated down$(NC)"
+
+migrate-base:
+	@echo "$(BLUE)==> Migrating database to base version...$(NC)"
+	PYTHONPATH=. uv run alembic downgrade base
+	@echo "$(GREEN)✓ Database migrated to base version$(NC)"
