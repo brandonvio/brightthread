@@ -90,8 +90,11 @@ export const OrderDetails: React.FC = () => {
           getConversation(orderId).catch(() => null),
         ]);
         setOrder(orderData);
-        if (conversationData) {
+        if (conversationData && conversationData.messages.length > 0) {
           setMessages(conversationData.messages);
+        } else {
+          // New conversation - auto-send greeting to trigger welcome message
+          triggerWelcome(orderId);
         }
       } catch {
         setError('Failed to load order');
@@ -101,6 +104,24 @@ export const OrderDetails: React.FC = () => {
     };
     fetchData();
   }, [orderId]);
+
+  // Auto-trigger welcome message for new conversations
+  const triggerWelcome = async (orderId: string): Promise<void> => {
+    setSending(true);
+    try {
+      const response = await sendChatMessage(orderId, 'hi');
+      const assistantMessage: ChatMessage = {
+        role: 'assistant',
+        content: response.content,
+        timestamp: new Date().toISOString(),
+      };
+      setMessages([assistantMessage]);
+    } catch {
+      // Silently fail - user can still type manually
+    } finally {
+      setSending(false);
+    }
+  };
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
