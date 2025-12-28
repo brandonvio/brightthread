@@ -64,10 +64,11 @@ class BackendServiceStack(Stack):
 
         # TEMP: Hardcoded values to allow RDSStack destruction
         # TODO: Restore Fn.import_value calls after RDSStack is recreated
-        db_secret_arn = "arn:aws:secretsmanager:us-west-2:PLACEHOLDER:secret:placeholder"
+        db_secret_arn = "arn:aws:secretsmanager:us-west-2:000000000000:secret:placeholder-AbCdEf"
         db_host = "placeholder.rds.amazonaws.com"
         db_port = "5432"
         db_name = "brightthread"
+        _rds_stack_removed = True  # Flag to skip secret grant
 
         bedrock_model_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 
@@ -116,12 +117,14 @@ class BackendServiceStack(Stack):
         )
 
         # Grant Secrets Manager read access for DB credentials
-        db_secret = secretsmanager.Secret.from_secret_complete_arn(
-            self,
-            "DBSecret",
-            secret_complete_arn=db_secret_arn,
-        )
-        db_secret.grant_read(execution_role)
+        # TEMP: Skip when RDS stack is removed
+        if not _rds_stack_removed:
+            db_secret = secretsmanager.Secret.from_secret_complete_arn(
+                self,
+                "DBSecret",
+                secret_complete_arn=db_secret_arn,
+            )
+            db_secret.grant_read(execution_role)
 
         # Build environment variables
         # Note: AWS_REGION is automatically set by Lambda runtime
