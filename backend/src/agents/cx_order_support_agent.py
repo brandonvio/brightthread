@@ -61,6 +61,8 @@ class AgentState(TypedDict):
     # Inventory check state
     inventory_check: dict[str, Any] | None
     inventory_confirmation_status: InventoryConfirmationStatus | None
+    # Conversation tracking
+    is_new_conversation: bool
 
 
 class CXOrderSupportAgent:
@@ -107,6 +109,8 @@ class CXOrderSupportAgent:
         """
         workflow = StateGraph(AgentState)
 
+        workflow.add_node("check_new_conversation", self._check_new_conversation)
+        workflow.add_node("welcome", self._welcome)
         workflow.add_node("intent_classification", self._intent_classification)
         workflow.add_node("unclear_intent_response", self._unclear_intent_response)
         workflow.add_node("off_topic_response", self._off_topic_response)
@@ -127,7 +131,20 @@ class CXOrderSupportAgent:
         )
         workflow.add_node("execute_modification", self._execute_modification_node)
 
-        workflow.set_entry_point("intent_classification")
+        workflow.set_entry_point("check_new_conversation")
+
+        # Route based on whether this is a new conversation
+        workflow.add_conditional_edges(
+            "check_new_conversation",
+            self._route_after_new_conversation_check,
+            {
+                "welcome": "welcome",
+                "intent_classification": "intent_classification",
+            },
+        )
+
+        # After welcome, go to intent classification to process the user's actual message
+        workflow.add_edge("welcome", "intent_classification")
 
         workflow.add_conditional_edges(
             "intent_classification",
@@ -301,6 +318,72 @@ class CXOrderSupportAgent:
         except ValidationError:
             logger.warning(f"Unclear intent classification output: {raw!r}")
             return Intent.UNCLEAR
+
+    def _check_new_conversation(self, state: AgentState) -> AgentState:
+        """Check if this is a new conversation (no prior state).
+
+        Args:
+            state: Current agent state
+
+        Returns:
+            State with is_new_conversation flag set
+        """
+        # A conversation is "new" if we have no prior order details loaded
+        # This means the checkpoint was empty when we started
+        is_new = state.get("order_details") is None
+        state["is_new_conversation"] = is_new
+        logger.debug(f"New conversation check: is_new={is_new}")
+        return state
+
+    def _route_after_new_conversation_check(self, state: AgentState) -> str:
+        """Route based on whether this is a new conversation."""
+        if state.get("is_new_conversation", False):
+            return "welcome"
+        return "intent_classification"
+
+    def _welcome(self, state: AgentState) -> AgentState:
+        """Generate a welcome message for new conversations.
+
+        Fetches order details and generates a friendly greeting that shows
+        the agent has context about the customer's order.
+
+        Args:
+            state: Current agent state
+
+        Returns:
+            Updated state with welcome message and order details fetched
+        """
+        logger.debug(f"Generating welcome for order_id={state['order_id']}")
+
+        # Fetch order details to have context
+        order_details = self.order_tools.get_order_details(state["order_id"])
+        state["order_details"] = order_details
+
+        # Generate welcome message using LLM
+        welcome_prompt = self.prompt_service.load_system_prompt("cx_welcome")
+
+        # Include order context in the prompt so agent knows what it's working with
+        order_context = (
+            f"Order ID: {state['order_id']}\n"
+            f"Status: {order_details.get('status', 'Unknown')}\n"
+            f"Line items: {len(order_details.get('line_items', []))}\n"
+            f"User's first message: {state['messages'][-1].content}\n"
+        )
+
+        messages = [
+            SystemMessage(content=welcome_prompt),
+            HumanMessage(content=f"Order context:\n{order_context}"),
+        ]
+
+        response = self.model.invoke(messages)
+        welcome_text = self._extract_llm_text(response.content)
+
+        # Store welcome text - subsequent nodes will append their response to this
+        state["response"] = welcome_text + "\n\n"
+        state["is_new_conversation"] = False  # Mark as no longer new
+
+        logger.info("Welcome message generated")
+        return state
 
     def _unclear_intent_response(self, state: AgentState) -> AgentState:
         """Ask the user to clarify when intent classification is unclear."""
@@ -1560,6 +1643,7 @@ class CXOrderSupportAgent:
             "policy_confirmation_status": previous_policy_confirmation_status,
             "inventory_check": previous_inventory_check,
             "inventory_confirmation_status": previous_inventory_confirmation_status,
+            "is_new_conversation": previous_order_details is None,
         }
 
         result = self.graph.invoke(initial_state, config)
