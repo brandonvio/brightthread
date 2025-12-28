@@ -64,6 +64,8 @@ jobs:
 
       - name: CDK Deploy Infrastructure Stacks
         working-directory: infrastructure
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: |
           # Deploy stacks in dependency order (excluding BackendServiceStack)
           # 1. Foundational stacks (no dependencies)
