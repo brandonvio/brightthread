@@ -62,11 +62,12 @@ class BackendServiceStack(Stack):
         """
         super().__init__(scope, construct_id, **kwargs)
 
-        # Import RDS configuration from CloudFormation exports
-        db_secret_arn = Fn.import_value("BrightThreadDBSecretArn")
-        db_host = Fn.import_value("BrightThreadDBEndpoint")
-        db_port = Fn.import_value("BrightThreadDBPort")
-        db_name = Fn.import_value("BrightThreadDBName")
+        # TEMP: Hardcoded values to allow RDSStack destruction
+        # TODO: Restore Fn.import_value calls after RDSStack is recreated
+        db_secret_arn = "arn:aws:secretsmanager:us-west-2:PLACEHOLDER:secret:placeholder"
+        db_host = "placeholder.rds.amazonaws.com"
+        db_port = "5432"
+        db_name = "brightthread"
 
         bedrock_model_id = "us.anthropic.claude-haiku-4-5-20251001-v1:0"
 

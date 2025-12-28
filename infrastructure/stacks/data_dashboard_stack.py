@@ -42,9 +42,10 @@ class DataDashboardStack(Stack):
         """
         super().__init__(scope, construct_id, **kwargs)
 
-        # Import RDS instance identifier from CloudFormation exports if not provided
+        # TEMP: Hardcoded value to allow RDSStack destruction
+        # TODO: Restore Fn.import_value call after RDSStack is recreated
         if db_instance_identifier is None:
-            db_instance_identifier = Fn.import_value("BrightThreadDBInstanceIdentifier")
+            db_instance_identifier = "placeholder-instance"
 
         dashboard = cloudwatch.Dashboard(
             self,
