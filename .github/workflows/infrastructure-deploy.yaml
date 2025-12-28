@@ -58,6 +58,8 @@ jobs:
 
       - name: CDK Synthesize
         working-directory: infrastructure
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
         run: uv run cdk synth
 
       - name: CDK Deploy Infrastructure Stacks
